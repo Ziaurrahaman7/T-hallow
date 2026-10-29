@@ -66,6 +66,8 @@ static void monPrintf(const char* fmt, ...) {
   monPrint(buf);
 }
 
+#include "../shared/netlog.h"
+
 uint32_t rxCount = 0;
 uint32_t lastPrint = 0;
 
@@ -370,6 +372,7 @@ void playPacket(uint8_t* p) {
     if (wasTalk) speakerClose();
     return;
   }
+  netHear(p, SAMPLES);
   speakerOpen();
   if (!spkOn) return;
   if (!wasTalk) {
@@ -540,9 +543,11 @@ void setup() {
   delay(2500);
   sendAT("AT+PAIR=0");
   monPrint("COM5 listening\n");
+  netBegin("STA");
 }
 
 void loop() {
+  netPoll();
   pumpUart();
   playQueued();
 
@@ -566,6 +571,7 @@ void loop() {
         adpcmPack(pcm, payload);
         if (sendPacket(payload)) {
           txCount++;
+          netNote(payload, PAYLOAD);
           lastSend = millis();
           if (peak > lastPeak) lastPeak = peak;
           else lastPeak = (lastPeak * 3 + peak) / 4;

@@ -58,6 +58,8 @@ static void monPrintf(const char* fmt, ...) {
   monPrint(buf);
 }
 
+#include "../shared/netlog.h"
+
 static int16_t ring[RING];
 static volatile int wpos = 0;
 static volatile int rpos = 0;
@@ -401,6 +403,7 @@ static void playPacket(uint8_t* p) {
     if (wasTalk) speakerClose();
     return;
   }
+  netHear(p, SAMPLES);
   speakerOpen();
   if (!spkOn) return;
   if (!wasTalk) {
@@ -582,9 +585,11 @@ void setup() {
 
   monPrint("mic ready\n");
   lastPrint = millis();
+  netBegin("AP");
 }
 
 void loop() {
+  netPoll();
   pumpUart();
   playQueued();
   int16_t pcm[PCM_N];
@@ -608,6 +613,7 @@ void loop() {
       adpcmPack(pcm, payload);
       if (sendPacket(payload)) {
         txCount++;
+        netNote(payload, PAYLOAD);
         lastSend = millis();
         if (peak > lastPeak) lastPeak = peak;
         else lastPeak = (lastPeak * 3 + peak) / 4;
