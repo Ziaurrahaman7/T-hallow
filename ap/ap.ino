@@ -1,41 +1,49 @@
-// AP mic. Upload this file to the mic board. Sends voice to the STA speaker.
+// AP board. Upload to the board whose mic is on GPIO7/6/15.
 // INMP441: SCK=GPIO7  WS=GPIO6  SD=GPIO15  VDD=3.3V  GND=GND  L/R=GND
-// 16 kHz mic, 8 kHz voice, 4-bit ADPCM. Quiet air is not sent.
+// MAX98357A: BCLK=GPIO17  LRC=GPIO16  DIN=GPIO18  VIN=VBAT  GND=GND
+// Talks both ways. Own voice uses magic A5 5A A5 5A. Plays STA magic A5 5A 5A A5.
 
 #include <Arduino.h>
 #include <driver/i2s_std.h>
-#include <driver/usb_serial_jtag.h>
 #include <stdio.h>
 #include <stdarg.h>
+#if !ARDUINO_USB_CDC_ON_BOOT
+#include "HWCDC.h"
+static HWCDC MonPort;
+#endif
 
 #define PCM_N 321
 #define PAYLOAD 163
 #define DECIM 2
 #define SHIFT 11
 #define RING 2048
+#define SAMPLES 163
+
+static const uint8_t OWN_MAGIC[4] = {0xA5, 0x5A, 0xA5, 0x5A};
+static const uint8_t PLAY_MAGIC[4] = {0xA5, 0x5A, 0x5A, 0xA5};
 
 HardwareSerial SerialAH(2);
 
 #if ARDUINO_USB_CDC_ON_BOOT
-static void monBegin() { Serial.begin(115200); }
-static size_t monWrite(const uint8_t* buf, size_t n) { return Serial.write(buf, n); }
-static void monFlush() { Serial.flush(); }
-#else
-static bool monOn = false;
 static void monBegin() {
-  if (!usb_serial_jtag_is_driver_installed()) {
-    usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
-    usb_serial_jtag_driver_install(&cfg);
-  }
-  monOn = true;
+  Serial.begin(115200);
+  Serial.setTxTimeoutMs(0);
 }
 static size_t monWrite(const uint8_t* buf, size_t n) {
-  if (!monOn || n == 0) return 0;
-  int w = usb_serial_jtag_write_bytes(buf, n, pdMS_TO_TICKS(50));
-  return w > 0 ? (size_t)w : 0;
+  if (n == 0) return 0;
+  return Serial.write(buf, n);
 }
-static void monFlush() { usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(50)); }
+#else
+static void monBegin() {
+  MonPort.begin(115200);
+  MonPort.setTxTimeoutMs(0);
+}
+static size_t monWrite(const uint8_t* buf, size_t n) {
+  if (n == 0) return 0;
+  return MonPort.write(buf, n);
+}
 #endif
+static void monFlush() {}
 
 static void monPrint(const char* s) {
   if (s) monWrite((const uint8_t*)s, strlen(s));
@@ -63,7 +71,21 @@ static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 static uint32_t txCount = 0;
 static uint32_t failCount = 0;
+static uint32_t rxCount = 0;
+static uint32_t playCount = 0;
 static uint32_t lastPrint = 0;
+static bool wantOk = false;
+static bool okFlag = false;
+static int matched = 0;
+static int pktIdx = 0;
+static bool collecting = false;
+static uint8_t pkt[SAMPLES];
+static uint8_t rxq[3][SAMPLES];
+static int rxqN = 0;
+static i2s_chan_handle_t spk = NULL;
+static bool wasTalk = false;
+static bool spkOn = false;
+static int16_t lastOut = 0;
 
 void at(const char *cmd) {
   while (SerialAH.available()) SerialAH.read();
@@ -284,23 +306,169 @@ bool takePacket(int16_t *dst) {
   return true;
 }
 
+static int16_t adpcmStep(int nibble, int* pred, int* index) {
+  int step = stepTable[*index];
+  int diffq = step >> 3;
+  if (nibble & 4) diffq += step;
+  if (nibble & 2) diffq += step >> 1;
+  if (nibble & 1) diffq += step >> 2;
+  if (nibble & 8) *pred -= diffq;
+  else *pred += diffq;
+  if (*pred > 32767) *pred = 32767;
+  if (*pred < -32768) *pred = -32768;
+  *index += indexTable[nibble & 15];
+  if (*index < 0) *index = 0;
+  if (*index > 88) *index = 88;
+  return (int16_t)*pred;
+}
+
+static bool adpcmUnpack(const uint8_t* in, int16_t* pcm) {
+  int index = in[2];
+  if (index > 88) return false;
+  int pred = (int16_t)(uint16_t)(in[0] | (in[1] << 8));
+  pcm[0] = (int16_t)pred;
+  int o = 3;
+  int s = 1;
+  while (o < SAMPLES && s + 1 < PCM_N) {
+    uint8_t b = in[o++];
+    pcm[s++] = adpcmStep(b >> 4, &pred, &index);
+    pcm[s++] = adpcmStep(b & 0x0F, &pred, &index);
+  }
+  return s == PCM_N;
+}
+
+static void pushSilence(int n) {
+  if (spk == NULL) return;
+  int16_t z[128];
+  memset(z, 0, sizeof(z));
+  for (int i = 0; i < n; i++) {
+    size_t w = 0;
+    i2s_channel_write(spk, z, sizeof(z), &w, 30);
+  }
+}
+
+static void fadeOut() {
+  if (spk == NULL) return;
+  int16_t stereo[48 * 2];
+  for (int i = 0; i < 48; i++) {
+    int16_t s = (int16_t)((int32_t)lastOut * (47 - i) / 48);
+    stereo[i * 2] = s;
+    stereo[i * 2 + 1] = s;
+  }
+  lastOut = 0;
+  size_t w = 0;
+  i2s_channel_write(spk, stereo, sizeof(stereo), &w, 40);
+}
+
+static void speakerOpen() {
+  if (spk == NULL || spkOn) return;
+  if (i2s_channel_enable(spk) == ESP_OK) spkOn = true;
+}
+
+static void speakerClose() {
+  if (spkOn) {
+    fadeOut();
+    pushSilence(2);
+    if (spk != NULL) i2s_channel_disable(spk);
+    spkOn = false;
+  }
+  wasTalk = false;
+  lastOut = 0;
+}
+
+static void playPacket(uint8_t* p) {
+  static uint8_t lastPkt[SAMPLES];
+  static bool haveLast = false;
+  rxCount++;
+  if (haveLast && memcmp(lastPkt, p, SAMPLES) == 0) return;
+  memcpy(lastPkt, p, SAMPLES);
+  haveLast = true;
+
+  int16_t pcm[PCM_N];
+  if (!adpcmUnpack(p, pcm)) return;
+
+  int peak = 0;
+  int strong = 0;
+  int hot = 0;
+  for (int i = 0; i < PCM_N; i++) {
+    int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
+    if (a > peak) peak = a;
+    if (a >= 400) strong++;
+    if (a >= 30000) hot++;
+  }
+  bool talk = peak >= 500 && strong >= 20 && hot < (PCM_N * 4) / 5;
+  if (!talk) {
+    if (wasTalk) speakerClose();
+    return;
+  }
+  speakerOpen();
+  if (!spkOn) return;
+  if (!wasTalk) {
+    for (int i = 0; i < 48 && i < PCM_N; i++) {
+      pcm[i] = (int16_t)((int32_t)pcm[i] * i / 48);
+    }
+  }
+  wasTalk = true;
+
+  static int16_t stereo[PCM_N * 2];
+  for (int i = 0; i < PCM_N; i++) {
+    int16_t s = (int16_t)(pcm[i] / 2);
+    stereo[i * 2] = s;
+    stereo[i * 2 + 1] = s;
+  }
+  lastOut = (int16_t)(pcm[PCM_N - 1] / 2);
+  size_t w = 0;
+  i2s_channel_write(spk, stereo, sizeof(stereo), &w, 200);
+  playCount++;
+}
+
+static void feedByte(uint8_t b) {
+  if (wantOk) {
+    static uint8_t prev = 0;
+    if (prev == 'O' && b == 'K') okFlag = true;
+    prev = b;
+  }
+  if (!collecting) {
+    if (b == PLAY_MAGIC[matched]) {
+      matched++;
+      if (matched == 4) {
+        collecting = true;
+        pktIdx = 0;
+        matched = 0;
+      }
+    } else {
+      matched = (b == PLAY_MAGIC[0]) ? 1 : 0;
+    }
+  } else {
+    pkt[pktIdx++] = b;
+    if (pktIdx >= SAMPLES) {
+      if (rxqN < 3) {
+        memcpy(rxq[rxqN], pkt, SAMPLES);
+        rxqN++;
+      }
+      collecting = false;
+    }
+  }
+}
+
+static void playQueued() {
+  if (rxqN <= 0) return;
+  uint8_t tmp[SAMPLES];
+  memcpy(tmp, rxq[0], SAMPLES);
+  if (rxqN > 1) memmove(rxq[0], rxq[1], (size_t)(rxqN - 1) * SAMPLES);
+  rxqN--;
+  playPacket(tmp);
+}
+
+static void pumpUart() {
+  while (SerialAH.available()) feedByte((uint8_t)SerialAH.read());
+}
+
 bool waitOk(uint32_t ms) {
-  char buf[48];
-  int n = 0;
-  buf[0] = 0;
   uint32_t t0 = millis();
   while (millis() - t0 < ms) {
-    while (SerialAH.available()) {
-      char c = (char)SerialAH.read();
-      if (n < (int)sizeof(buf) - 1) buf[n++] = c;
-      else {
-        memmove(buf, buf + 1, sizeof(buf) - 2);
-        buf[sizeof(buf) - 2] = c;
-        n = (int)sizeof(buf) - 1;
-      }
-      buf[n] = 0;
-      if (strstr(buf, "OK")) return true;
-    }
+    pumpUart();
+    if (okFlag) return true;
     delay(1);
   }
   return false;
@@ -311,7 +479,7 @@ void drainQuiet() {
   uint32_t last = millis();
   while (millis() - t0 < 40) {
     if (SerialAH.available()) {
-      SerialAH.read();
+      pumpUart();
       last = millis();
     } else if (millis() - last >= 8) {
       return;
@@ -323,30 +491,60 @@ void drainQuiet() {
 
 bool sendPacket(const uint8_t *audio) {
   static uint8_t frame[14 + 4 + PAYLOAD];
-  // 14-byte header: broadcast MAC, source and type left 0.
-  // ASCII "111111" is 0x31, not this STA, so the module never delivers it.
   memset(frame, 0xFF, 6);
   memset(frame + 6, 0, 8);
-  frame[14] = 0xA5;
-  frame[15] = 0x5A;
-  frame[16] = 0xA5;
-  frame[17] = 0x5A;
+  memcpy(frame + 14, OWN_MAGIC, 4);
   memcpy(frame + 18, audio, PAYLOAD);
   const int len = 18 + PAYLOAD;
 
-  while (SerialAH.available()) SerialAH.read();
+  pumpUart();
   SerialAH.print("AT+TXDATA=");
   SerialAH.print(len);
   SerialAH.print("\r\n");
-  if (!waitOk(150)) {
+  wantOk = true;
+  okFlag = false;
+  bool ok = waitOk(150);
+  wantOk = false;
+  if (!ok) {
     SerialAH.print("\r\n");
     delay(10);
-    while (SerialAH.available()) SerialAH.read();
+    pumpUart();
     return false;
   }
   SerialAH.write(frame, len);
   SerialAH.flush();
   drainQuiet();
+  return true;
+}
+
+static bool setupSpeaker() {
+  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+  chan.auto_clear = true;
+  esp_err_t okChan = i2s_new_channel(&chan, &spk, NULL);
+  i2s_std_config_t cfg = {
+    .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(8000),
+    .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+    .gpio_cfg = {
+      .mclk = I2S_GPIO_UNUSED,
+      .bclk = (gpio_num_t)17,
+      .ws = (gpio_num_t)16,
+      .dout = (gpio_num_t)18,
+      .din = I2S_GPIO_UNUSED,
+      .invert_flags = {
+        .mclk_inv = false,
+        .bclk_inv = false,
+        .ws_inv = false,
+      },
+    },
+  };
+  esp_err_t okStd = (okChan == ESP_OK) ? i2s_channel_init_std_mode(spk, &cfg) : okChan;
+  if (okStd != ESP_OK) {
+    spk = NULL;
+    monPrintf("speaker pin fail chan=%d std=%d\n", (int)okChan, (int)okStd);
+    return false;
+  }
+  spkOn = false;
+  monPrint("speaker quiet\n");
   return true;
 }
 
@@ -358,6 +556,7 @@ void setup() {
   SerialAH.begin(115200, SERIAL_8N1, 4, 5);
 
   if (setupI2S()) xTaskCreatePinnedToCore(micTask, "mic", 8192, NULL, 3, NULL, 0);
+  setupSpeaker();
 
   delay(1200);
   while (SerialAH.available()) SerialAH.read();
@@ -386,6 +585,8 @@ void setup() {
 }
 
 void loop() {
+  pumpUart();
+  playQueued();
   int16_t pcm[PCM_N];
   if (!takePacket(pcm)) {
     delay(2);
@@ -399,7 +600,8 @@ void loop() {
     }
     static int lastPeak = 0;
     static uint32_t lastSend = 0;
-    bool voice = nLoud >= 28 && peak >= 350;
+    int need = wasTalk ? 1200 : 350;
+    bool voice = nLoud >= 28 && peak >= need;
     bool echo = lastPeak > 0 && (millis() - lastSend) < 280 && peak * 3 < lastPeak * 2;
     if (voice && !echo) {
       uint8_t payload[PAYLOAD];
@@ -419,30 +621,27 @@ void loop() {
 
   if (millis() - lastPrint > 1000) {
     int pk;
-    uint32_t d;
     uint32_t c0;
     uint32_t c1;
-    uint32_t clips;
     portENTER_CRITICAL(&mux);
     pk = peakHold;
     peakHold = 0;
-    d = dropped;
     dropped = 0;
     c0 = slot0Hold;
     c1 = slot1Hold;
-    clips = clipHold;
+    clipHold = 0;
     slot0Hold = 0;
     slot1Hold = 0;
     clipHold = 0;
     portEXIT_CRITICAL(&mux);
-    monPrintf("tx=%lu fail=%lu peak=%d c0=%lu c1=%lu clip=%lu drop=%lu\n",
+    monPrintf("tx=%lu rx=%lu play=%lu fail=%lu peak=%d c0=%lu c1=%lu\n",
                   (unsigned long)txCount,
+                  (unsigned long)rxCount,
+                  (unsigned long)playCount,
                   (unsigned long)failCount,
                   pk,
                   (unsigned long)c0,
-                  (unsigned long)c1,
-                  (unsigned long)clips,
-                  (unsigned long)d);
+                  (unsigned long)c1);
     lastPrint = millis();
   }
 }
