@@ -174,8 +174,6 @@ static void micTask(void *) {
       if (v > 32767) v = 32767;
       if (v < -32768) v = -32768;
       int32_t a = v < 0 ? -v : v;
-      if (a < 200) v = (int32_t)v * a / 200;
-      a = v < 0 ? -v : v;
       if (a > 22000) {
         int32_t shaped = 22000 + (a - 22000) / 4;
         v = v < 0 ? -shaped : shaped;
@@ -361,7 +359,7 @@ static void speakerClose() {
 }
 
 static void speakerIdle() {
-  if (spkOn && phraseMs != 0 && (uint32_t)(millis() - phraseMs) > 650) speakerClose();
+  if (spkOn && phraseMs != 0 && (uint32_t)(millis() - phraseMs) > 900) speakerClose();
 }
 
 void playPacket(uint8_t* p) {
@@ -382,10 +380,10 @@ void playPacket(uint8_t* p) {
     if (a > peak) peak = a;
     if (a >= 400) strong++;
   }
-  bool start = peak >= 700 && strong >= 12;
+  bool start = peak >= 600 && strong >= 8;
   if (start) phraseMs = millis();
-  bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 650;
-  if (!phrase || peak < 250) return;
+  bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 900;
+  if (!phrase) return;
   netHear(p, SAMPLES);
   speakerOpen();
   if (!spkOn) return;
@@ -404,7 +402,7 @@ void playPacket(uint8_t* p) {
   }
   lastOut = (int16_t)(pcm[PCM_N - 1] / 2);
   size_t w = 0;
-  i2s_channel_write(spk, stereo, sizeof(stereo), &w, 200);
+  i2s_channel_write(spk, stereo, sizeof(stereo), &w, 60);
   playCount++;
 }
 
@@ -412,7 +410,7 @@ static int matched = 0;
 static int pktIdx = 0;
 static bool collecting = false;
 static uint8_t airPkt[SAMPLES];
-static uint8_t rxq[3][SAMPLES];
+static uint8_t rxq[8][SAMPLES];
 static int rxqN = 0;
 
 static void feedByte(uint8_t b) {
@@ -435,7 +433,7 @@ static void feedByte(uint8_t b) {
   } else {
     airPkt[pktIdx++] = b;
     if (pktIdx >= SAMPLES) {
-      if (rxqN < 3) {
+      if (rxqN < 8) {
         memcpy(rxq[rxqN], airPkt, SAMPLES);
         rxqN++;
       }
@@ -574,28 +572,16 @@ void loop() {
       for (int i = 0; i < PCM_N; i++) {
         int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
         if (a > peak) peak = a;
-        if (a >= 500) nStrong++;
+        if (a >= 400) nStrong++;
       }
       static uint32_t voicedMs = 0;
       static int lastPeak = 0;
       static uint32_t lastSend = 0;
-      bool shaped = peak >= 900 && nStrong >= 12;
+      bool shaped = peak >= 800 && nStrong >= 8;
       if (shaped) voicedMs = millis();
-      bool voice = shaped || (voicedMs != 0 && (uint32_t)(millis() - voicedMs) < 600 && peak >= 400 && nStrong >= 6);
-      bool echo = wasTalk && lastPeak > 0 && (uint32_t)(millis() - lastSend) < 180 && peak * 4 < lastPeak;
+      bool voice = shaped || (voicedMs != 0 && (uint32_t)(millis() - voicedMs) < 800 && peak >= 250);
+      bool echo = wasTalk && peak < 250 && (uint32_t)(millis() - lastSend) < 150;
       if (voice && !echo) {
-        if (shaped && peak >= 1600 && peak < 14000) {
-          int mul = 14000 / peak;
-          if (mul > 2) mul = 2;
-          if (mul > 1) {
-            for (int i = 0; i < PCM_N; i++) {
-              int32_t s = (int32_t)pcm[i] * mul;
-              if (s > 16000) s = 16000;
-              if (s < -16000) s = -16000;
-              pcm[i] = (int16_t)s;
-            }
-          }
-        }
         uint8_t payload[PAYLOAD];
         adpcmPack(pcm, payload);
         if (sendPacket(payload)) {
