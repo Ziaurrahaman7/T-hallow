@@ -1,5 +1,8 @@
 <?php
 
+require_once dirname(__DIR__) . '/lib/store.php';
+talk_require_web();
+
 $id = isset($_GET['id']) ? (string) $_GET['id'] : '';
 if (!preg_match('/^u[a-f0-9]{16}$/', $id)) {
     http_response_code(404);

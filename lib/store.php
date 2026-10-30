@@ -20,6 +20,79 @@ function talk_paths(): array
     ];
 }
 
+function talk_wifi_file(): string
+{
+    return talk_paths()['root'] . '/wifi.json';
+}
+
+function talk_c_quote(string $value): string
+{
+    return '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $value) . '"';
+}
+
+function talk_wifi_from_header(): array
+{
+    $text = (string) @file_get_contents(dirname(__DIR__) . '/shared/net_config.h');
+    $ssid = '';
+    $pass = '';
+    if (preg_match('/#define\s+NET_SSID\s+"((?:\\\\.|[^"\\\\])*)"/', $text, $m)) {
+        $ssid = stripcslashes($m[1]);
+    }
+    if (preg_match('/#define\s+NET_PASS\s+"((?:\\\\.|[^"\\\\])*)"/', $text, $m)) {
+        $pass = stripcslashes($m[1]);
+    }
+    return ['ssid' => $ssid, 'pass' => $pass];
+}
+
+function talk_wifi_read(): array
+{
+    $file = talk_wifi_file();
+    if (is_file($file)) {
+        $data = json_decode((string) file_get_contents($file), true);
+        if (is_array($data) && isset($data['ssid'])) {
+            return [
+                'ssid' => (string) $data['ssid'],
+                'pass' => (string) ($data['pass'] ?? ''),
+            ];
+        }
+    }
+    return talk_wifi_from_header();
+}
+
+function talk_wifi_save(string $ssid, string $pass): void
+{
+    $ssid = trim($ssid);
+    if (strlen($ssid) > 32) {
+        $ssid = substr($ssid, 0, 32);
+    }
+    if (strlen($pass) > 64) {
+        $pass = substr($pass, 0, 64);
+    }
+    $dir = talk_paths()['root'];
+    if (!is_dir($dir)) {
+        mkdir($dir, 0777, true);
+    }
+    file_put_contents(
+        talk_wifi_file(),
+        json_encode(['ssid' => $ssid, 'pass' => $pass], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
+    );
+    $path = dirname(__DIR__) . '/shared/net_config.h';
+    $text = @file_get_contents($path);
+    if ($text === false) {
+        return;
+    }
+    $lines = preg_split("/\r\n|\n|\r/", $text);
+    foreach ($lines as $i => $line) {
+        if (strpos(ltrim($line), '#define NET_SSID ') === 0) {
+            $lines[$i] = '#define NET_SSID ' . talk_c_quote($ssid);
+        }
+        if (strpos(ltrim($line), '#define NET_PASS ') === 0) {
+            $lines[$i] = '#define NET_PASS ' . talk_c_quote($pass);
+        }
+    }
+    file_put_contents($path, implode("\n", $lines) . "\n");
+}
+
 function talk_bangla_day(int $unix): string
 {
     $months = [
@@ -160,6 +233,75 @@ function talk_save_batch(string $board, int $boardNow, array $clips): int
     return count($made);
 }
 
+function talk_id_ok(string $id): bool
+{
+    return (bool) preg_match('/^u[a-f0-9]{16}$/', $id);
+}
+
+function talk_clear(bool $all, array $ids): int
+{
+    $paths = talk_paths();
+    if (!is_dir($paths['wav'])) {
+        mkdir($paths['wav'], 0777, true);
+    }
+    $fp = fopen($paths['index'], 'c+');
+    if ($fp === false) {
+        return 0;
+    }
+    flock($fp, LOCK_EX);
+    $raw = stream_get_contents($fp);
+    $data = json_decode($raw ?: '', true);
+    if (!is_array($data) || !isset($data['utterances']) || !is_array($data['utterances'])) {
+        $data = ['utterances' => []];
+    }
+    $drop = [];
+    if ($all) {
+        foreach ($data['utterances'] as $row) {
+            if (isset($row['id'])) {
+                $drop[(string) $row['id']] = true;
+            }
+        }
+        foreach (glob($paths['wav'] . '/u*.wav') ?: [] as $file) {
+            $drop[basename($file, '.wav')] = true;
+        }
+    } else {
+        foreach ($ids as $id) {
+            $id = (string) $id;
+            if (talk_id_ok($id)) {
+                $drop[$id] = true;
+            }
+        }
+    }
+    $kept = [];
+    $removed = 0;
+    foreach ($data['utterances'] as $row) {
+        $id = isset($row['id']) ? (string) $row['id'] : '';
+        if ($id !== '' && isset($drop[$id])) {
+            $removed++;
+            continue;
+        }
+        $kept[] = $row;
+    }
+    foreach (array_keys($drop) as $id) {
+        if (!talk_id_ok($id)) {
+            continue;
+        }
+        $file = $paths['wav'] . '/' . $id . '.wav';
+        if (is_file($file)) {
+            unlink($file);
+        }
+    }
+    $data['utterances'] = $kept;
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    ftruncate($fp, 0);
+    rewind($fp);
+    fwrite($fp, $json === false ? '{"utterances":[]}' : $json);
+    fflush($fp);
+    flock($fp, LOCK_UN);
+    fclose($fp);
+    return $removed;
+}
+
 function talk_list(): array
 {
     $paths = talk_paths();
@@ -171,4 +313,76 @@ function talk_list(): array
         return [];
     }
     return $data['utterances'];
+}
+
+function talk_auth_file(): string
+{
+    return talk_paths()['root'] . '/auth.json';
+}
+
+function talk_auth_read(): array
+{
+    $file = talk_auth_file();
+    if (!is_file($file)) {
+        $dir = talk_paths()['root'];
+        if (!is_dir($dir)) {
+            mkdir($dir, 0777, true);
+        }
+        $data = [
+            'user' => 'admin',
+            'hash' => password_hash('hallow', PASSWORD_DEFAULT),
+        ];
+        file_put_contents($file, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+        return $data;
+    }
+    $data = json_decode((string) file_get_contents($file), true);
+    if (!is_array($data) || !isset($data['user'], $data['hash'])) {
+        return ['user' => '', 'hash' => ''];
+    }
+    return [
+        'user' => (string) $data['user'],
+        'hash' => (string) $data['hash'],
+    ];
+}
+
+function talk_session_start(): void
+{
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        return;
+    }
+    session_name('HALLOWSESS');
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    session_start();
+}
+
+function talk_logged_in(): bool
+{
+    return isset($_SESSION['talk_user']) && $_SESSION['talk_user'] !== '';
+}
+
+function talk_try_login(string $user, string $pass): bool
+{
+    $auth = talk_auth_read();
+    if ($auth['user'] === '' || !hash_equals($auth['user'], $user)) {
+        return false;
+    }
+    return password_verify($pass, $auth['hash']);
+}
+
+function talk_require_web(): void
+{
+    talk_session_start();
+    if (talk_logged_in()) {
+        return;
+    }
+    http_response_code(401);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo '{"ok":false}';
+    exit;
 }

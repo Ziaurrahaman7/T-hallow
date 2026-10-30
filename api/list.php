@@ -2,6 +2,8 @@
 
 require_once dirname(__DIR__) . '/lib/store.php';
 
+talk_require_web();
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
