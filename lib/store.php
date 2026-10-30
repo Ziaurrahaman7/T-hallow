@@ -149,7 +149,7 @@ function talk_save_batch(string $board, int $boardNow, array $clips): int
     $groups = [];
     $cur = null;
     foreach ($decoded as $item) {
-        if ($cur === null || $item['who'] !== $cur['who'] || ($item['t'] - $cur['last']) > 500) {
+        if ($cur === null || $item['who'] !== $cur['who'] || ($item['t'] - $cur['last']) > 2000) {
             if ($cur !== null) {
                 $groups[] = $cur;
             }
@@ -173,31 +173,6 @@ function talk_save_batch(string $board, int $boardNow, array $clips): int
         $groups[] = $cur;
     }
 
-    $made = [];
-    foreach ($groups as $group) {
-        $id = 'u' . bin2hex(random_bytes(8));
-        $wav = wav_from_pcm($group['pcm']);
-        $file = $paths['wav'] . '/' . $id . '.wav';
-        if (file_put_contents($file, $wav) === false) {
-            continue;
-        }
-        $age = $boardNow > $group['start'] ? ($boardNow - $group['start']) : 0;
-        $wall = $nowMs - $age;
-        $unix = (int) floor($wall / 1000);
-        $sec = round(count($group['pcm']) / 8000, 2);
-        $made[] = [
-            'id' => $id,
-            'board' => $group['who'],
-            'ms' => $wall,
-            'at' => date('H:i:s', $unix),
-            'day' => talk_bangla_day($unix),
-            'sec' => $sec,
-        ];
-    }
-    if (!$made) {
-        return 0;
-    }
-
     $fp = fopen($paths['index'], 'c+');
     if ($fp === false) {
         return 0;
@@ -208,8 +183,61 @@ function talk_save_batch(string $board, int $boardNow, array $clips): int
     if (!is_array($data) || !isset($data['utterances']) || !is_array($data['utterances'])) {
         $data = ['utterances' => []];
     }
-    foreach ($made as $row) {
-        $data['utterances'][] = $row;
+    $saved = 0;
+    foreach ($groups as $group) {
+        $age = $boardNow > $group['start'] ? ($boardNow - $group['start']) : 0;
+        $wall = $nowMs - $age;
+        $sec = round(count($group['pcm']) / 8000, 2);
+        $joined = false;
+        for ($i = count($data['utterances']) - 1; $i >= 0; $i--) {
+            $prev = $data['utterances'][$i];
+            if (!isset($prev['board'], $prev['ms'], $prev['id']) || $prev['board'] !== $group['who']) {
+                continue;
+            }
+            $prevEnd = (int) $prev['ms'] + (int) round(((float) ($prev['sec'] ?? 0)) * 1000);
+            $prevSec = (float) ($prev['sec'] ?? 0);
+            if ($wall + 400 < $prevEnd || ($wall - $prevEnd) > 2000 || $prevSec > 25) {
+                break;
+            }
+            $file = $paths['wav'] . '/' . $prev['id'] . '.wav';
+            $old = talk_wav_samples($file);
+            if (!$old) {
+                break;
+            }
+            $gap = (int) round(($wall - $prevEnd) * 8);
+            if ($gap > 8 && $gap < 16000) {
+                $old = array_merge($old, array_fill(0, $gap, 0));
+            }
+            $pcm = array_merge($old, $group['pcm']);
+            if (file_put_contents($file, wav_from_pcm($pcm)) === false) {
+                break;
+            }
+            $data['utterances'][$i]['sec'] = round(count($pcm) / 8000, 2);
+            $joined = true;
+            $saved++;
+            break;
+        }
+        if ($joined) {
+            continue;
+        }
+        if (count($group['pcm']) < 640) {
+            continue;
+        }
+        $id = 'u' . bin2hex(random_bytes(8));
+        $file = $paths['wav'] . '/' . $id . '.wav';
+        if (file_put_contents($file, wav_from_pcm($group['pcm'])) === false) {
+            continue;
+        }
+        $unix = (int) floor($wall / 1000);
+        $data['utterances'][] = [
+            'id' => $id,
+            'board' => $group['who'],
+            'ms' => $wall,
+            'at' => date('H:i:s', $unix),
+            'day' => talk_bangla_day($unix),
+            'sec' => $sec,
+        ];
+        $saved++;
     }
     usort($data['utterances'], function ($a, $b) {
         return ($a['ms'] <=> $b['ms']);
@@ -230,7 +258,33 @@ function talk_save_batch(string $board, int $boardNow, array $clips): int
     fflush($fp);
     flock($fp, LOCK_UN);
     fclose($fp);
-    return count($made);
+    return $saved;
+}
+
+function talk_wav_samples(string $file): array
+{
+    if (!is_file($file)) {
+        return [];
+    }
+    $raw = file_get_contents($file);
+    if ($raw === false || strlen($raw) < 44) {
+        return [];
+    }
+    $pcm = substr($raw, 44);
+    $out = [];
+    $n = intdiv(strlen($pcm), 2);
+    for ($i = 0; $i < $n; $i++) {
+        $u = unpack('v', substr($pcm, $i * 2, 2));
+        if ($u === false) {
+            break;
+        }
+        $s = $u[1];
+        if ($s >= 32768) {
+            $s -= 65536;
+        }
+        $out[] = $s;
+    }
+    return $out;
 }
 
 function talk_id_ok(string $id): bool

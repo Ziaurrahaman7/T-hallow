@@ -6,6 +6,7 @@
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <Preferences.h>
 #include <esp_heap_caps.h>
 #include <string.h>
 
@@ -25,9 +26,11 @@ static int netStored = 0;
 static portMUX_TYPE netMux = portMUX_INITIALIZER_UNLOCKED;
 static char netBoard[8] = "AP";
 static volatile uint32_t netActiveMs = 0;
+static volatile uint32_t netPlayMs = 0;
 static volatile int netState = 0;
 static volatile int netSent = 0;
 static volatile int netFailCode = 0;
+static volatile int netHold = 0;
 
 static void netKeep(const uint8_t* data, int n, char who, bool mine) {
   if (netClips == nullptr || data == nullptr || n < 163) return;
@@ -47,6 +50,118 @@ static void netNote(const uint8_t* data, int n) {
 
 static void netHear(const uint8_t* data, int n) {
   netKeep(data, n, netBoard[0] == 'S' ? 'A' : 'S', false);
+  netPlayMs = millis();
+}
+
+static void netRadio() {
+  WiFi.setSleep(true);
+  WiFi.setTxPower(WIFI_POWER_15dBm);
+}
+
+static char netSsid[33];
+static char netPass[65];
+static char netGoodSsid[33];
+static char netGoodPass[65];
+static char netSkipSsid[33];
+static char netSkipPass[65];
+static bool netSwitching = false;
+static uint32_t netSwitchAt = 0;
+
+static void netCopy(char* dst, int cap, const char* src) {
+  if (cap <= 0) return;
+  strncpy(dst, src ? src : "", cap - 1);
+  dst[cap - 1] = 0;
+}
+
+static void netSaveCreds() {
+  Preferences prefs;
+  if (!prefs.begin("hallow", false)) return;
+  prefs.putString("ssid", netSsid);
+  prefs.putString("pass", netPass);
+  prefs.end();
+}
+
+static void netLoadCreds() {
+  netCopy(netSsid, sizeof(netSsid), NET_SSID);
+  netCopy(netPass, sizeof(netPass), NET_PASS);
+  Preferences prefs;
+  if (!prefs.begin("hallow", true)) return;
+  String ssid = prefs.getString("ssid", "");
+  String pass = prefs.getString("pass", "");
+  prefs.end();
+  if (ssid.length() > 0) {
+    netCopy(netSsid, sizeof(netSsid), ssid.c_str());
+    netCopy(netPass, sizeof(netPass), pass.c_str());
+  }
+  netCopy(netGoodSsid, sizeof(netGoodSsid), netSsid);
+  netCopy(netGoodPass, sizeof(netGoodPass), netPass);
+}
+
+static bool netJsonField(const char* json, const char* key, char* out, int cap) {
+  char pat[20];
+  snprintf(pat, sizeof(pat), "\"%s\":\"", key);
+  const char* p = strstr(json, pat);
+  if (p == nullptr) return false;
+  p += strlen(pat);
+  int o = 0;
+  while (*p && *p != '"' && o + 1 < cap) {
+    if (*p == '\\' && p[1]) {
+      p++;
+      out[o++] = *p++;
+      continue;
+    }
+    out[o++] = *p++;
+  }
+  out[o] = 0;
+  return *p == '"';
+}
+
+static void netJoin() {
+  WiFi.setSleep(false);
+  WiFi.begin(netSsid, netPass);
+}
+
+static void netUse(const char* ssid, const char* pass) {
+  netCopy(netSsid, sizeof(netSsid), ssid);
+  netCopy(netPass, sizeof(netPass), pass);
+  WiFi.disconnect();
+  netJoin();
+  netState = 1;
+}
+
+static void netPullWifi() {
+  char url[180];
+  const char* src = NET_URL;
+  const char* slash = strrchr(src, '/');
+  if (slash == nullptr) return;
+  int n = (int)(slash - src + 1);
+  if (n <= 0 || n >= (int)sizeof(url)) return;
+  memcpy(url, src, n);
+  snprintf(url + n, sizeof(url) - n, "wifi.php?token=%s", NET_TOKEN);
+
+  WiFiClient client;
+  HTTPClient http;
+  http.setTimeout(4000);
+  http.setConnectTimeout(3000);
+  if (!http.begin(client, url)) return;
+  int code = http.GET();
+  if (code != 200) {
+    http.end();
+    return;
+  }
+  String body = http.getString();
+  http.end();
+
+  char ssid[33];
+  char pass[65];
+  if (!netJsonField(body.c_str(), "ssid", ssid, sizeof(ssid))) return;
+  if (!netJsonField(body.c_str(), "pass", pass, sizeof(pass))) return;
+  if (ssid[0] == '\0') return;
+  if (strcmp(ssid, netSsid) == 0 && strcmp(pass, netPass) == 0) return;
+  if (strcmp(ssid, netSkipSsid) == 0 && strcmp(pass, netSkipPass) == 0) return;
+  netSwitching = true;
+  netSwitchAt = millis();
+  netUse(ssid, pass);
 }
 
 static int netTake(NetClip* out, int maxn) {
@@ -157,17 +272,53 @@ static void netTask(void*) {
   for (;;) {
     if (WiFi.status() != WL_CONNECTED) {
       netState = 1;
-      if (millis() - lastBegin > 10000) {
+      if (netSwitching && millis() - netSwitchAt > 20000) {
+        netCopy(netSkipSsid, sizeof(netSkipSsid), netSsid);
+        netCopy(netSkipPass, sizeof(netSkipPass), netPass);
+        netSwitching = false;
         lastBegin = millis();
-        WiFi.begin(NET_SSID, NET_PASS);
+        netUse(netGoodSsid, netGoodPass);
+        netSaveCreds();
+      } else if (!netSwitching && millis() - lastBegin > 10000) {
+        lastBegin = millis();
+        int st = (int)WiFi.status();
+        if (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL || st == WL_CONNECTION_LOST) {
+          WiFi.disconnect(false, false);
+          vTaskDelay(pdMS_TO_TICKS(200));
+        }
+        netJoin();
       }
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
     }
+    if (netState != 2) netRadio();
+    if (netSwitching) {
+      netSwitching = false;
+      netCopy(netGoodSsid, sizeof(netGoodSsid), netSsid);
+      netCopy(netGoodPass, sizeof(netGoodPass), netPass);
+      netSaveCreds();
+      netSkipSsid[0] = 0;
+      netSkipPass[0] = 0;
+    }
     lastBegin = millis();
     netState = 2;
-    bool idle = (uint32_t)(millis() - netActiveMs) > 1200;
-    if (netStored > 0 && idle) {
+    uint32_t now = millis();
+    uint32_t lastAudio = netActiveMs > netPlayMs ? netActiveMs : netPlayMs;
+    bool idle = (uint32_t)(now - lastAudio) > 700;
+    bool stale = false;
+    if (netStored > 0) {
+      uint32_t oldest = 0;
+      portENTER_CRITICAL(&netMux);
+      if (netCap > 0) {
+        int start = (netHead - netStored + netCap) % netCap;
+        oldest = netClips[start].t;
+      }
+      portEXIT_CRITICAL(&netMux);
+      stale = oldest > 0 && (uint32_t)(now - oldest) > 6000;
+    }
+    netHold = idle || stale ? 0 : netStored;
+    static uint32_t netWifiPoll = 0;
+    if (netStored > 0 && (idle || stale)) {
       int n = netTake(batch, NET_BATCH);
       if (n > 0) {
         if (netPost(json, batch, n)) {
@@ -180,15 +331,21 @@ static void netTask(void*) {
         }
       }
     }
+    if (idle && now - netWifiPoll > 15000) {
+      netWifiPoll = now;
+      netPullWifi();
+    }
     vTaskDelay(pdMS_TO_TICKS(350));
   }
 }
 
 static void netBegin(const char* board) {
-  if (NET_SSID[0] == '\0') return;
+  netLoadCreds();
+  if (netSsid[0] == '\0') return;
   strncpy(netBoard, board ? board : "AP", sizeof(netBoard) - 1);
   netBoard[sizeof(netBoard) - 1] = 0;
   netActiveMs = millis();
+  netPlayMs = millis();
 
   if (psramFound()) {
     netCap = 20000;
@@ -208,9 +365,8 @@ static void netBegin(const char* board) {
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   delay(100);
-  WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
-  WiFi.begin(NET_SSID, NET_PASS);
+  netJoin();
   if (xTaskCreatePinnedToCore(netTask, "net", 20480, NULL, 1, NULL, 1) != pdPASS) {
     monPrint("net task fail\n");
     return;
@@ -240,6 +396,10 @@ static void netPoll() {
     int code = netFailCode;
     netFailCode = 0;
     monPrintf("net fail %d\n", code);
+  }
+  if (netState == 2 && netHold > 0 && millis() - lastWait > 5000) {
+    lastWait = millis();
+    monPrintf("net hold %d\n", netHold);
   }
   if (netSent > 0) {
     int n;
