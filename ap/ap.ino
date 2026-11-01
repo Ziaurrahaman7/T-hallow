@@ -620,7 +620,6 @@ void loop() {
     static uint32_t voicedMs = 0;
     static int lastPeak = 0;
     static uint32_t lastSend = 0;
-    static int dashRun = 0;
     int nLoud = 0;
     for (int i = 0; i < PCM_N; i++) {
       int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
@@ -635,20 +634,15 @@ void loop() {
       adpcmPack(pcm, payload);
       if (sendPacket(payload)) {
         txCount++;
-        bool dash = peak >= 950 && nLoud >= 10;
-        if (dash) {
-          dashRun++;
-          if (dashRun >= 2 || peak >= 1300) netNote(payload, PAYLOAD);
-        }
+        if (shaped && peak >= 750 && nLoud >= 5) netNote(payload, PAYLOAD);
         lastSend = millis();
         if (peak > lastPeak) lastPeak = peak;
         else lastPeak = (lastPeak * 3 + peak) / 4;
       } else {
         failCount++;
       }
-    } else {
-      dashRun = 0;
-      if (millis() - lastSend > 400) lastPeak = 0;
+    } else if (millis() - lastSend > 400) {
+      lastPeak = 0;
     }
   }
 

@@ -477,7 +477,7 @@ static void netTask(void*) {
     netState = 2;
     uint32_t now = millis();
     uint32_t lastAudio = netActiveMs > netPlayMs ? netActiveMs : netPlayMs;
-    bool idle = (uint32_t)(now - lastAudio) > 1100;
+    bool idle = (uint32_t)(now - lastAudio) > 850;
     bool stale = false;
     if (netStored > 0) {
       uint32_t oldest = 0;

@@ -239,11 +239,14 @@ function talk_pcm_peak(array $pcm): int
 function talk_voice_like(array $pcm): bool
 {
     $n = count($pcm);
-    if ($n < 960) {
+    if ($n < 640) {
         return false;
     }
     $peak = talk_pcm_peak($pcm);
-    if ($peak < 900) {
+    if ($peak >= 1050) {
+        return true;
+    }
+    if ($peak < 680) {
         return false;
     }
     $strong = 0;
@@ -254,25 +257,25 @@ function talk_voice_like(array $pcm): bool
         $s = (int) $s;
         $a = abs($s);
         $sum += $a;
-        if ($a >= 500) {
+        if ($a >= 450) {
             $strong++;
         }
-        if ($i > 0 && (($s ^ $prev) < 0) && ($a > 180 || abs($prev) > 180)) {
+        if ($i > 0 && (($s ^ $prev) < 0) && ($a > 150 || abs($prev) > 150)) {
             $zcr++;
         }
         $prev = $s;
     }
     $avg = $sum / $n;
-    if ($avg < 90) {
+    if ($avg < 55) {
         return false;
     }
-    if ($strong < (int) ($n * 0.06)) {
+    if ($strong < (int) ($n * 0.035)) {
         return false;
     }
-    if ($strong > (int) ($n * 0.82)) {
+    if ($strong > (int) ($n * 0.90)) {
         return false;
     }
-    if ($zcr < 10 || $zcr > 140) {
+    if ($zcr < 5 || $zcr > 200) {
         return false;
     }
 
@@ -298,7 +301,7 @@ function talk_save_batch(string $board, int $boardNow, array $clips): int
             continue;
         }
         $pcm = adpcm_unpack($raw);
-        if ($pcm === null || talk_pcm_peak($pcm) < 650) {
+        if ($pcm === null || talk_pcm_peak($pcm) < 400) {
             continue;
         }
         $t = (int) $clip['t'];
@@ -383,7 +386,7 @@ function talk_save_batch(string $board, int $boardNow, array $clips): int
             if ($gap > 8 && $gap < 16000) {
                 $old = array_merge($old, array_fill(0, $gap, 0));
             }
-            if (! talk_voice_like($group['pcm']) && talk_pcm_peak($group['pcm']) < 800) {
+            if (! talk_voice_like($group['pcm']) && talk_pcm_peak($group['pcm']) < 720) {
                 break;
             }
             $pcm = array_merge($old, $group['pcm']);
