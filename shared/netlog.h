@@ -1,11 +1,14 @@
 #pragma once
 
 #include "net_config.h"
+#include "fw_version.h"
 
 #if NET_ON
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <HTTPUpdate.h>
+#include <WiFiClientSecure.h>
 #include <Preferences.h>
 #include <esp_heap_caps.h>
 #include <string.h>
@@ -114,6 +117,14 @@ static bool netJsonField(const char* json, const char* key, char* out, int cap) 
   }
   out[o] = 0;
   return *p == '"';
+}
+
+static int netJsonInt(const char* json, const char* key, int fallback) {
+  char pat[24];
+  snprintf(pat, sizeof(pat), "\"%s\":", key);
+  const char* p = strstr(json, pat);
+  if (p == nullptr) return fallback;
+  return atoi(p + strlen(pat));
 }
 
 static void netJoin() {
@@ -261,6 +272,85 @@ static bool netPost(char* json, const NetClip* batch, int n) {
   return code == 200;
 }
 
+static int netFwReported() {
+  int ver = FW_VERSION;
+  Preferences prefs;
+  if (!prefs.begin("hallow", true)) return ver;
+  int saved = prefs.getInt("fw", 0);
+  prefs.end();
+  if (saved > ver) ver = saved;
+  return ver;
+}
+
+static void netFwSave(int ver) {
+  Preferences prefs;
+  if (!prefs.begin("hallow", false)) return;
+  prefs.putInt("fw", ver);
+  prefs.end();
+}
+
+static bool netApiUrl(char* out, int cap, const char* leaf) {
+  const char* src = NET_URL;
+  const char* slash = strrchr(src, '/');
+  if (slash == nullptr) return false;
+  int n = (int)(slash - src + 1);
+  if (n <= 0 || n >= cap) return false;
+  memcpy(out, src, n);
+  snprintf(out + n, cap - n, "%s", leaf);
+  return true;
+}
+
+static void netFirmware() {
+  uint32_t lastAudio = netActiveMs > netPlayMs ? netActiveMs : netPlayMs;
+  if ((uint32_t)(millis() - lastAudio) < 700) return;
+  char leaf[96];
+  snprintf(leaf, sizeof(leaf), "fw.php?token=%s&board=%s&ver=%d",
+           NET_TOKEN, netBoard, netFwReported());
+  char url[220];
+  if (!netApiUrl(url, sizeof(url), leaf)) return;
+  bool tls = strncmp(url, "https://", 8) == 0;
+  WiFiClient plain;
+  WiFiClientSecure secure;
+  HTTPClient http;
+  http.setTimeout(8000);
+  http.setConnectTimeout(5000);
+  bool begun = false;
+  if (tls) {
+    secure.setInsecure();
+    begun = http.begin(secure, url);
+  } else {
+    begun = http.begin(plain, url);
+  }
+  if (!begun) return;
+  int code = http.GET();
+  if (code != 200) {
+    http.end();
+    return;
+  }
+  String body = http.getString();
+  http.end();
+  if (netJsonInt(body.c_str(), "update", 0) != 1) return;
+  int ver = netJsonInt(body.c_str(), "version", 0);
+  if (ver <= netFwReported()) return;
+  char bin[300];
+  char md5[40];
+  if (!netJsonField(body.c_str(), "url", bin, sizeof(bin))) return;
+  if (!netJsonField(body.c_str(), "md5", md5, sizeof(md5))) return;
+  lastAudio = netActiveMs > netPlayMs ? netActiveMs : netPlayMs;
+  if ((uint32_t)(millis() - lastAudio) < 700) return;
+  httpUpdate.rebootOnUpdate(false);
+  HTTPUpdateResult ret;
+  if (tls) ret = httpUpdate.update(secure, bin, md5);
+  else ret = httpUpdate.update(plain, bin, md5);
+  if (ret == HTTP_UPDATE_OK) {
+    netFwSave(ver);
+    delay(200);
+    ESP.restart();
+  }
+  int err = httpUpdate.getLastError();
+  netFailCode = err == 0 ? -20 : err;
+}
+
 static void netTask(void*) {
   NetClip* batch = (NetClip*)malloc(sizeof(NetClip) * NET_BATCH);
   char* json = (char*)malloc(NET_JSON);
@@ -335,6 +425,11 @@ static void netTask(void*) {
       netWifiPoll = now;
       netPullWifi();
     }
+    static uint32_t netFwPoll = 0;
+    if (idle && now - netFwPoll > 30000) {
+      netFwPoll = now;
+      netFirmware();
+    }
     vTaskDelay(pdMS_TO_TICKS(350));
   }
 }
@@ -367,7 +462,7 @@ static void netBegin(const char* board) {
   delay(100);
   WiFi.setAutoReconnect(true);
   netJoin();
-  if (xTaskCreatePinnedToCore(netTask, "net", 20480, NULL, 1, NULL, 1) != pdPASS) {
+  if (xTaskCreatePinnedToCore(netTask, "net", 32768, NULL, 1, NULL, 1) != pdPASS) {
     monPrint("net task fail\n");
     return;
   }

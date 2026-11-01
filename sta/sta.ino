@@ -1,3 +1,4 @@
+// USB আপলোডের আগে: Tools → Partition Scheme → Minimal SPIFFS (1.9MB APP with OTA).
 // STA board. Upload to the board whose speaker is on GPIO7/6/15.
 // MAX98357A: BCLK=GPIO7  LRC=GPIO6  DIN=GPIO15  GND=GND  VIN=VBAT
 // INMP441: SCK=GPIO17  WS=GPIO16  SD=GPIO18  VDD=3.3V  GND=GND  L/R=GND

@@ -1,3 +1,4 @@
+// USB আপলোডের আগে: Tools → Partition Scheme → Minimal SPIFFS (1.9MB APP with OTA).
 // AP board. Upload to the board whose mic is on GPIO7/6/15.
 // INMP441: SCK=GPIO7  WS=GPIO6  SD=GPIO15  VDD=3.3V  GND=GND  L/R=GND
 // MAX98357A: BCLK=GPIO17  LRC=GPIO16  DIN=GPIO18  VIN=VBAT  GND=GND

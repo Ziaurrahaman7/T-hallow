@@ -122,7 +122,7 @@ if (!talk_logged_in()) {
     <label>পাসওয়ার্ড
       <input name="pass" type="password" maxlength="80" required autocomplete="current-password">
     </label>
-    <button type="submit">ঢুকুন</button>
+    <button type="submit">সাইন ইন</button>
     <p class="err"><?php echo htmlspecialchars($loginError, ENT_QUOTES, 'UTF-8'); ?></p>
   </form>
 </body>
@@ -323,6 +323,8 @@ $who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
     margin-top: 4px;
   }
   #wifiMsg { color: var(--sta); font-size: 14px; min-height: 20px; }
+  .fwrow { display: flex; flex-wrap: wrap; gap: 8px; }
+  #fwApMsg, #fwStaMsg { color: var(--sta); font-size: 14px; min-height: 20px; }
   .talkbar {
     display: flex;
     flex-wrap: wrap;
@@ -497,6 +499,7 @@ $who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
   <nav>
     <button type="button" class="menu on" data-panel="talk">কথোপকথন</button>
     <button type="button" class="menu" data-panel="wifi">Wi-Fi সেটিংস</button>
+    <button type="button" class="menu" data-panel="fw">বোর্ড আপডেট</button>
   </nav>
   <div class="navfoot">
     <span class="user"><?php echo $who; ?></span>
@@ -545,6 +548,39 @@ $who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
       </label>
       <button type="submit">Wi-Fi সেভ</button>
       <span id="wifiMsg"></span>
+    </form>
+  </div>
+  <div class="view" id="panelFw" hidden>
+    <p class="talkbar hint">প্রথমবার USB দিয়ে দিতে হবে, পার্টিশন Minimal SPIFFS (1.9MB APP with OTA)। তারপর এখান থেকে। সংস্করণ আগের চেয়ে বড় রাখুন।</p>
+    <form id="fwAp" class="sheet wifi">
+      <h2>AP আপডেট</h2>
+      <p id="fwApStat">এখনো কোনো ফাইল নেই।</p>
+      <label>সংস্করণ
+        <input id="fwApVer" type="number" min="1" max="9999" required>
+      </label>
+      <label>Arduino থেকে Export compiled Binary করা .bin
+        <input id="fwApFile" type="file" accept=".bin,application/octet-stream" required>
+      </label>
+      <div class="fwrow">
+        <button type="submit">ফাইল রাখুন</button>
+        <button type="button" id="fwApPush">বোর্ডে পাঠান</button>
+      </div>
+      <span id="fwApMsg"></span>
+    </form>
+    <form id="fwSta" class="sheet wifi">
+      <h2>STA আপডেট</h2>
+      <p id="fwStaStat">এখনো কোনো ফাইল নেই।</p>
+      <label>সংস্করণ
+        <input id="fwStaVer" type="number" min="1" max="9999" required>
+      </label>
+      <label>Arduino থেকে Export compiled Binary করা .bin
+        <input id="fwStaFile" type="file" accept=".bin,application/octet-stream" required>
+      </label>
+      <div class="fwrow">
+        <button type="submit">ফাইল রাখুন</button>
+        <button type="button" id="fwStaPush">বোর্ডে পাঠান</button>
+      </div>
+      <span id="fwStaMsg"></span>
     </form>
   </div>
 </section>
@@ -822,7 +858,8 @@ wifiForm.addEventListener('submit', async (event) => {
 
 const panels = {
   talk: ['কথোপকথন', 'গ্রুপ চ্যাট। যে যখন ভয়েস দেয়, সেই সময়ে এখানে আসে।'],
-  wifi: ['Wi-Fi সেটিংস', 'নাম বদলালে বোর্ড নেটে থাকলে কথা থামার পর নিজে নিয়ে নেবে।']
+  wifi: ['Wi-Fi সেটিংস', 'নাম বদলালে বোর্ড নেটে থাকলে কথা থামার পর নিজে নিয়ে নেবে।'],
+  fw: ['বোর্ড আপডেট', 'ফাইল রাখুন, তারপর বোর্ডে পাঠান। বোর্ড কথা থামলে নিজে নেবে।']
 };
 document.querySelectorAll('button.menu').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -832,12 +869,82 @@ document.querySelectorAll('button.menu').forEach((btn) => {
     });
     document.getElementById('panelTalk').hidden = name !== 'talk';
     document.getElementById('panelWifi').hidden = name !== 'wifi';
+    document.getElementById('panelFw').hidden = name !== 'fw';
     document.getElementById('pageTitle').textContent = panels[name][0];
     document.getElementById('pageSub').textContent = panels[name][1];
     btn.scrollIntoView({ inline: 'center', block: 'nearest' });
     if (name === 'talk') pinBottom();
+    if (name === 'fw') loadFw();
   });
 });
+
+function fwStat(row) {
+  if (!row || !row.has) return 'এখনো কোনো ফাইল নেই।';
+  const pub = row.published ? 'বোর্ডে পাঠানো আছে' : 'রাখা আছে, এখনো পাঠানো হয়নি';
+  return 'সংস্করণ ' + banglaNum(row.version) + ' · ' + pub;
+}
+
+async function loadFw() {
+  try {
+    const res = await fetch('api/fw.php', { cache: 'no-store' });
+    if (gone(res)) return;
+    const data = await res.json();
+    if (!data.ok) return;
+    document.getElementById('fwApStat').textContent = fwStat(data.AP);
+    document.getElementById('fwStaStat').textContent = fwStat(data.STA);
+    const apNext = Math.max(2, (data.AP && data.AP.version ? data.AP.version : 1) + 1);
+    const staNext = Math.max(2, (data.STA && data.STA.version ? data.STA.version : 1) + 1);
+    if (!document.getElementById('fwApVer').value) document.getElementById('fwApVer').value = apNext;
+    if (!document.getElementById('fwStaVer').value) document.getElementById('fwStaVer').value = staNext;
+  } catch (e) {}
+}
+
+function bindFw(formId, board, fileId, verId, msgId, pushId) {
+  const form = document.getElementById(formId);
+  const msg = document.getElementById(msgId);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    msg.textContent = '';
+    msg.style.color = '';
+    const fd = new FormData();
+    fd.append('board', board);
+    fd.append('version', document.getElementById(verId).value);
+    fd.append('file', document.getElementById(fileId).files[0]);
+    try {
+      const res = await fetch('api/fw.php', { method: 'POST', body: fd });
+      if (gone(res)) return;
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.err || 'bad');
+      msg.textContent = 'ফাইল রাখা হয়েছে। বোর্ডে পাঠান চাপলে বোর্ড নেবে।';
+      document.getElementById(fileId).value = '';
+      await loadFw();
+    } catch (e) {
+      msg.textContent = 'ফাইল রাখা যায়নি। .bin ফাইল এবং সংস্করণ দেখুন।';
+      msg.style.color = 'var(--danger)';
+    }
+  });
+  document.getElementById(pushId).addEventListener('click', async () => {
+    msg.textContent = '';
+    msg.style.color = '';
+    try {
+      const res = await fetch('api/fw.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ board: board, publish: 1 })
+      });
+      if (gone(res)) return;
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error('bad');
+      msg.textContent = 'পাঠানো হয়েছে। বোর্ড কথা থামলে নিজে আপডেট নেবে।';
+      await loadFw();
+    } catch (e) {
+      msg.textContent = 'আগে ফাইল রাখুন।';
+      msg.style.color = 'var(--danger)';
+    }
+  });
+}
+bindFw('fwAp', 'AP', 'fwApFile', 'fwApVer', 'fwApMsg', 'fwApPush');
+bindFw('fwSta', 'STA', 'fwStaFile', 'fwStaVer', 'fwStaMsg', 'fwStaPush');
 
 load();
 setInterval(load, 4000);
