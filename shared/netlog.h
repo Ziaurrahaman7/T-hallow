@@ -477,7 +477,7 @@ static void netTask(void*) {
     netState = 2;
     uint32_t now = millis();
     uint32_t lastAudio = netActiveMs > netPlayMs ? netActiveMs : netPlayMs;
-    bool idle = (uint32_t)(now - lastAudio) > 700;
+    bool idle = (uint32_t)(now - lastAudio) > 1100;
     bool stale = false;
     if (netStored > 0) {
       uint32_t oldest = 0;
@@ -487,7 +487,7 @@ static void netTask(void*) {
         oldest = netClips[start].t;
       }
       portEXIT_CRITICAL(&netMux);
-      stale = oldest > 0 && (uint32_t)(now - oldest) > 6000;
+      stale = oldest > 0 && (uint32_t)(now - oldest) > 8000;
     }
     netHold = idle || stale ? 0 : netStored;
     static uint32_t netWifiPoll = 0;

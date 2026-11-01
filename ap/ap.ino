@@ -83,7 +83,7 @@ static int matched = 0;
 static int pktIdx = 0;
 static bool collecting = false;
 static uint8_t pkt[SAMPLES];
-static uint8_t rxq[8][SAMPLES];
+static uint8_t rxq[12][SAMPLES];
 static int rxqN = 0;
 static i2s_chan_handle_t spk = NULL;
 static bool wasTalk = false;
@@ -457,7 +457,7 @@ static void feedByte(uint8_t b) {
   } else {
     pkt[pktIdx++] = b;
     if (pktIdx >= SAMPLES) {
-      if (rxqN < 8) {
+      if (rxqN < 12) {
         memcpy(rxq[rxqN], pkt, SAMPLES);
         rxqN++;
       }
@@ -620,6 +620,12 @@ void loop() {
     static uint32_t voicedMs = 0;
     static int lastPeak = 0;
     static uint32_t lastSend = 0;
+    static int dashRun = 0;
+    int nLoud = 0;
+    for (int i = 0; i < PCM_N; i++) {
+      int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
+      if (a >= 500) nLoud++;
+    }
     bool shaped = peak >= 800 && nStrong >= 8;
     if (shaped) voicedMs = millis();
     bool voice = shaped || (voicedMs != 0 && (uint32_t)(millis() - voicedMs) < 900 && peak >= 300);
@@ -629,15 +635,20 @@ void loop() {
       adpcmPack(pcm, payload);
       if (sendPacket(payload)) {
         txCount++;
-        if (shaped) netNote(payload, PAYLOAD);
+        bool dash = peak >= 950 && nLoud >= 10;
+        if (dash) {
+          dashRun++;
+          if (dashRun >= 2 || peak >= 1300) netNote(payload, PAYLOAD);
+        }
         lastSend = millis();
         if (peak > lastPeak) lastPeak = peak;
         else lastPeak = (lastPeak * 3 + peak) / 4;
       } else {
         failCount++;
       }
-    } else if (millis() - lastSend > 400) {
-      lastPeak = 0;
+    } else {
+      dashRun = 0;
+      if (millis() - lastSend > 400) lastPeak = 0;
     }
   }
 

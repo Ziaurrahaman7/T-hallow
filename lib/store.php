@@ -236,6 +236,49 @@ function talk_pcm_peak(array $pcm): int
     return $peak;
 }
 
+function talk_voice_like(array $pcm): bool
+{
+    $n = count($pcm);
+    if ($n < 960) {
+        return false;
+    }
+    $peak = talk_pcm_peak($pcm);
+    if ($peak < 900) {
+        return false;
+    }
+    $strong = 0;
+    $sum = 0;
+    $zcr = 0;
+    $prev = 0;
+    foreach ($pcm as $i => $s) {
+        $s = (int) $s;
+        $a = abs($s);
+        $sum += $a;
+        if ($a >= 500) {
+            $strong++;
+        }
+        if ($i > 0 && (($s ^ $prev) < 0) && ($a > 180 || abs($prev) > 180)) {
+            $zcr++;
+        }
+        $prev = $s;
+    }
+    $avg = $sum / $n;
+    if ($avg < 90) {
+        return false;
+    }
+    if ($strong < (int) ($n * 0.06)) {
+        return false;
+    }
+    if ($strong > (int) ($n * 0.82)) {
+        return false;
+    }
+    if ($zcr < 10 || $zcr > 140) {
+        return false;
+    }
+
+    return true;
+}
+
 function talk_save_batch(string $board, int $boardNow, array $clips): int
 {
     date_default_timezone_set('Asia/Dhaka');
@@ -255,7 +298,7 @@ function talk_save_batch(string $board, int $boardNow, array $clips): int
             continue;
         }
         $pcm = adpcm_unpack($raw);
-        if ($pcm === null) {
+        if ($pcm === null || talk_pcm_peak($pcm) < 650) {
             continue;
         }
         $t = (int) $clip['t'];
@@ -340,6 +383,9 @@ function talk_save_batch(string $board, int $boardNow, array $clips): int
             if ($gap > 8 && $gap < 16000) {
                 $old = array_merge($old, array_fill(0, $gap, 0));
             }
+            if (! talk_voice_like($group['pcm']) && talk_pcm_peak($group['pcm']) < 800) {
+                break;
+            }
             $pcm = array_merge($old, $group['pcm']);
             if (file_put_contents($file, wav_from_pcm($pcm)) === false) {
                 break;
@@ -352,10 +398,7 @@ function talk_save_batch(string $board, int $boardNow, array $clips): int
         if ($joined) {
             continue;
         }
-        if (count($group['pcm']) < 960) {
-            continue;
-        }
-        if (talk_pcm_peak($group['pcm']) < 700) {
+        if (! talk_voice_like($group['pcm'])) {
             continue;
         }
         $id = 'u' . bin2hex(random_bytes(8));
