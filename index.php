@@ -132,7 +132,9 @@ if (!talk_logged_in()) {
 }
 
 $cfg = talk_config();
-$upload = $cfg['upload_url'];
+$uploadUrls = talk_upload_urls();
+$upload = $uploadUrls[0] ?? $cfg['upload_url'];
+$upload2 = $uploadUrls[1] ?? '';
 $who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
 ?>
 <!DOCTYPE html>
@@ -323,6 +325,7 @@ $who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
     margin-top: 4px;
   }
   #wifiMsg { color: var(--sta); font-size: 14px; min-height: 20px; }
+  .url-chip { display: inline-block; margin: 2px 4px 2px 0; font-size: 11px; word-break: break-all; }
   .fwrow { display: flex; flex-wrap: wrap; gap: 8px; }
   #fwApMsg, #fwStaMsg { color: var(--sta); font-size: 14px; min-height: 20px; }
   .talkbar {
@@ -525,7 +528,11 @@ $who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
     <div class="talkbar">
       <button type="button" id="clearPick" disabled>নির্বাচিত মুছুন</button>
       <button type="button" id="clearAll" class="danger">সব মুছুন</button>
-      <span class="hint">পাঠানোর ঠিকানা: <code id="url"><?php echo htmlspecialchars($upload, ENT_QUOTES, 'UTF-8'); ?></code></span>
+      <span class="hint">পাঠানোর ঠিকানা:
+        <?php foreach ($uploadUrls as $u): ?>
+          <code class="url-chip"><?php echo htmlspecialchars($u, ENT_QUOTES, 'UTF-8'); ?></code>
+        <?php endforeach; ?>
+      </span>
     </div>
     <main id="main">
       <div class="empty" id="empty">
@@ -545,6 +552,12 @@ $who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
       </label>
       <label>পাসওয়ার্ড
         <input id="wifiPass" type="password" maxlength="64" placeholder="খালি রাখলে আগেরটা থাকবে" autocomplete="new-password">
+      </label>
+      <label>ড্যাশবোর্ড ১ (কথা পাঠানোর ঠিকানা)
+        <input id="uploadUrl" type="url" maxlength="220" required value="<?php echo htmlspecialchars($upload, ENT_QUOTES, 'UTF-8'); ?>">
+      </label>
+      <label>ড্যাশবোর্ড ২ (ঐচ্ছিক — লোকাল + সার্ভার দুটো)
+        <input id="uploadUrl2" type="url" maxlength="220" placeholder="https://hallow.mmgbd.com/api/upload.php" value="<?php echo htmlspecialchars($upload2, ENT_QUOTES, 'UTF-8'); ?>">
       </label>
       <button type="submit">Wi-Fi সেভ</button>
       <span id="wifiMsg"></span>
@@ -842,7 +855,9 @@ wifiForm.addEventListener('submit', async (event) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ssid: document.getElementById('wifiSsid').value,
-        pass: document.getElementById('wifiPass').value
+        pass: document.getElementById('wifiPass').value,
+        upload_url: document.getElementById('uploadUrl').value,
+        upload_url2: document.getElementById('uploadUrl2').value
       })
     });
     if (gone(res)) return;
@@ -858,7 +873,7 @@ wifiForm.addEventListener('submit', async (event) => {
 
 const panels = {
   talk: ['কথোপকথন', 'গ্রুপ চ্যাট। যে যখন ভয়েস দেয়, সেই সময়ে এখানে আসে।'],
-  wifi: ['Wi-Fi সেটিংস', 'নাম বদলালে বোর্ড নেটে থাকলে কথা থামার পর নিজে নিয়ে নেবে।'],
+  wifi: ['Wi-Fi সেটিংস', 'Wi-Fi ও ড্যাশবোর্ড ঠিকানা। বোর্ড কথা দুটো সার্ভারে পাঠাতে পারে।'],
   fw: ['বোর্ড আপডেট', 'ফাইল রাখুন, তারপর বোর্ডে পাঠান। বোর্ড কথা থামলে নিজে নেবে।']
 };
 document.querySelectorAll('button.menu').forEach((btn) => {

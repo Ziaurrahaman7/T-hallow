@@ -2,12 +2,131 @@
 
 require_once __DIR__ . '/adpcm.php';
 
+function talk_live_upload_url(): string
+{
+    return 'https://hallow.mmgbd.com/api/upload.php';
+}
+
+function talk_base_url(): ?string
+{
+    if (PHP_SAPI === 'cli' || empty($_SERVER['HTTP_HOST'])) {
+        return null;
+    }
+    $https = (! empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
+    $scheme = $https ? 'https' : 'http';
+    $host = (string) $_SERVER['HTTP_HOST'];
+    $sn = (string) ($_SERVER['SCRIPT_NAME'] ?? '');
+    if (str_ends_with($sn, '/index.php')) {
+        return $scheme.'://'.$host.substr($sn, 0, -strlen('/index.php'));
+    }
+    if (str_contains($sn, '/api/')) {
+        return $scheme.'://'.$host.substr($sn, 0, strpos($sn, '/api/'));
+    }
+
+    return $scheme.'://'.$host;
+}
+
 function talk_config(): array
 {
+    $base = talk_base_url();
+    $self = $base !== null
+        ? rtrim($base, '/').'/api/upload.php'
+        : 'http://127.0.0.1/T-hallow/api/upload.php';
+
     return [
         'token' => 'hallow',
-        'upload_url' => 'http://192.168.0.101/T-hallow/api/upload.php',
+        'upload_url' => $self,
     ];
+}
+
+function talk_servers_file(): string
+{
+    return talk_paths()['root'].'/servers.json';
+}
+
+/**
+ * @return list<string>
+ */
+function talk_servers_default_uploads(): array
+{
+    $self = talk_config()['upload_url'];
+    $live = talk_live_upload_url();
+    if (rtrim($self, '/') === rtrim($live, '/')) {
+        return [$self];
+    }
+
+    return [$self, $live];
+}
+
+/**
+ * @return array{uploads: list<string>}
+ */
+function talk_servers_read(): array
+{
+    $uploads = talk_servers_default_uploads();
+    $file = talk_servers_file();
+    if (is_file($file)) {
+        $data = json_decode((string) file_get_contents($file), true);
+        if (is_array($data) && isset($data['uploads']) && is_array($data['uploads'])) {
+            $uploads = [];
+            foreach ($data['uploads'] as $url) {
+                $url = trim((string) $url);
+                if ($url === '' || strlen($url) > 220) {
+                    continue;
+                }
+                if (! preg_match('#^https?://#i', $url)) {
+                    continue;
+                }
+                $uploads[] = $url;
+            }
+        }
+    }
+    $uploads = array_values(array_unique($uploads));
+    if ($uploads === []) {
+        $uploads = talk_servers_default_uploads();
+    }
+
+    return ['uploads' => array_slice($uploads, 0, 2)];
+}
+
+/**
+ * @param  list<string>  $uploads
+ */
+function talk_servers_save(array $uploads): void
+{
+    $clean = [];
+    foreach ($uploads as $url) {
+        $url = trim((string) $url);
+        if ($url === '' || strlen($url) > 220) {
+            continue;
+        }
+        if (! preg_match('#^https?://#i', $url)) {
+            continue;
+        }
+        $clean[] = $url;
+    }
+    $clean = array_values(array_unique($clean));
+    if ($clean === []) {
+        $clean = talk_servers_default_uploads();
+    }
+    $clean = array_slice($clean, 0, 2);
+    $dir = talk_paths()['root'];
+    if (! is_dir($dir)) {
+        mkdir($dir, 0777, true);
+    }
+    file_put_contents(
+        talk_servers_file(),
+        json_encode(['uploads' => $clean], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
+    );
+}
+
+/**
+ * @return list<string>
+ */
+function talk_upload_urls(): array
+{
+    return talk_servers_read()['uploads'];
 }
 
 function talk_paths(): array
@@ -102,6 +221,19 @@ function talk_bangla_day(int $unix): string
     ];
     $m = (int) date('n', $unix);
     return date('j', $unix) . ' ' . $months[$m] . ' ' . date('Y', $unix);
+}
+
+function talk_pcm_peak(array $pcm): int
+{
+    $peak = 0;
+    foreach ($pcm as $s) {
+        $a = abs((int) $s);
+        if ($a > $peak) {
+            $peak = $a;
+        }
+    }
+
+    return $peak;
 }
 
 function talk_save_batch(string $board, int $boardNow, array $clips): int
@@ -220,7 +352,10 @@ function talk_save_batch(string $board, int $boardNow, array $clips): int
         if ($joined) {
             continue;
         }
-        if (count($group['pcm']) < 640) {
+        if (count($group['pcm']) < 960) {
+            continue;
+        }
+        if (talk_pcm_peak($group['pcm']) < 700) {
             continue;
         }
         $id = 'u' . bin2hex(random_bytes(8));

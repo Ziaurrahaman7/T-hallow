@@ -391,7 +391,7 @@ static void speakerClose() {
 }
 
 static void speakerIdle() {
-  if (spkOn && phraseMs != 0 && (uint32_t)(millis() - phraseMs) > 900) speakerClose();
+  if (spkOn && phraseMs != 0 && (uint32_t)(millis() - phraseMs) > 1400) speakerClose();
 }
 
 static void playPacket(uint8_t* p) {
@@ -414,9 +414,8 @@ static void playPacket(uint8_t* p) {
   }
   bool start = peak >= 600 && strong >= 8;
   if (start) phraseMs = millis();
-  bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 900;
+  bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 1400;
   if (!phrase) return;
-  netHear(p, SAMPLES);
   speakerOpen();
   if (!spkOn) return;
   if (!wasTalk) {
@@ -434,7 +433,7 @@ static void playPacket(uint8_t* p) {
   }
   lastOut = (int16_t)(pcm[PCM_N - 1] / 2);
   size_t w = 0;
-  i2s_channel_write(spk, stereo, sizeof(stereo), &w, 60);
+  i2s_channel_write(spk, stereo, sizeof(stereo), &w, 80);
   playCount++;
 }
 
@@ -468,12 +467,13 @@ static void feedByte(uint8_t b) {
 }
 
 static void playQueued() {
-  if (rxqN <= 0) return;
-  uint8_t tmp[SAMPLES];
-  memcpy(tmp, rxq[0], SAMPLES);
-  if (rxqN > 1) memmove(rxq[0], rxq[1], (size_t)(rxqN - 1) * SAMPLES);
-  rxqN--;
-  playPacket(tmp);
+  for (int drain = 0; rxqN > 0 && drain < 6; drain++) {
+    uint8_t tmp[SAMPLES];
+    memcpy(tmp, rxq[0], SAMPLES);
+    if (rxqN > 1) memmove(rxq[0], rxq[1], (size_t)(rxqN - 1) * SAMPLES);
+    rxqN--;
+    playPacket(tmp);
+  }
 }
 
 static void pumpUart() {
@@ -622,14 +622,14 @@ void loop() {
     static uint32_t lastSend = 0;
     bool shaped = peak >= 800 && nStrong >= 8;
     if (shaped) voicedMs = millis();
-    bool voice = shaped || (voicedMs != 0 && (uint32_t)(millis() - voicedMs) < 800 && peak >= 250);
+    bool voice = shaped || (voicedMs != 0 && (uint32_t)(millis() - voicedMs) < 900 && peak >= 300);
     bool echo = wasTalk && peak < 250 && (uint32_t)(millis() - lastSend) < 150;
     if (voice && !echo) {
       uint8_t payload[PAYLOAD];
       adpcmPack(pcm, payload);
       if (sendPacket(payload)) {
         txCount++;
-        netNote(payload, PAYLOAD);
+        if (shaped) netNote(payload, PAYLOAD);
         lastSend = millis();
         if (peak > lastPeak) lastPeak = peak;
         else lastPeak = (lastPeak * 3 + peak) / 4;

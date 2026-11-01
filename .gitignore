@@ -1,6 +1,7 @@
 data/index.json
 data/wav/
 data/wifi.json
+data/servers.json
 data/auth.json
 data/fw.json
 data/fw/

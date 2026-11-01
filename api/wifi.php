@@ -15,7 +15,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         exit;
     }
     $wifi = talk_wifi_read();
-    echo json_encode(['ok' => true, 'ssid' => $wifi['ssid'], 'pass' => $wifi['pass']], JSON_UNESCAPED_UNICODE);
+    echo json_encode([
+        'ok' => true,
+        'ssid' => $wifi['ssid'],
+        'pass' => $wifi['pass'],
+        'uploads' => talk_upload_urls(),
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -47,4 +52,24 @@ if ($pass === '') {
     $pass = $current['pass'];
 }
 talk_wifi_save($ssid, $pass);
-echo json_encode(['ok' => true, 'ssid' => $ssid]);
+
+$uploads = [];
+if (isset($body['uploads']) && is_array($body['uploads'])) {
+    foreach ($body['uploads'] as $url) {
+        $uploads[] = (string) $url;
+    }
+} else {
+    $u1 = trim((string) ($body['upload_url'] ?? ''));
+    $u2 = trim((string) ($body['upload_url2'] ?? ''));
+    if ($u1 !== '') {
+        $uploads[] = $u1;
+    }
+    if ($u2 !== '') {
+        $uploads[] = $u2;
+    }
+}
+if ($uploads !== []) {
+    talk_servers_save($uploads);
+}
+
+echo json_encode(['ok' => true, 'ssid' => $ssid, 'uploads' => talk_upload_urls()], JSON_UNESCAPED_UNICODE);

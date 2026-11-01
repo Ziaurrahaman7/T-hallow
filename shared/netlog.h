@@ -70,6 +70,10 @@ static char netSkipPass[65];
 static bool netSwitching = false;
 static uint32_t netSwitchAt = 0;
 
+static const int NET_UPLOAD_MAX = 2;
+static char netUploadUrls[NET_UPLOAD_MAX][220];
+static int netUploadN = 0;
+
 static void netCopy(char* dst, int cap, const char* src) {
   if (cap <= 0) return;
   strncpy(dst, src ? src : "", cap - 1);
@@ -119,6 +123,72 @@ static bool netJsonField(const char* json, const char* key, char* out, int cap) 
   return *p == '"';
 }
 
+static void netInitUploads() {
+  netUploadN = 0;
+  netCopy(netUploadUrls[netUploadN], sizeof(netUploadUrls[0]), NET_URL);
+  netUploadN = 1;
+#ifdef NET_URL_ALT
+  if (NET_URL_ALT[0] != '\0' && strcmp(NET_URL, NET_URL_ALT) != 0 && netUploadN < NET_UPLOAD_MAX) {
+    netCopy(netUploadUrls[netUploadN], sizeof(netUploadUrls[0]), NET_URL_ALT);
+    netUploadN++;
+  }
+#endif
+}
+
+static const char* netUploadBase() {
+  if (netUploadN > 0 && netUploadUrls[0][0] != '\0') return netUploadUrls[0];
+  return NET_URL;
+}
+
+static bool netHttpBegin(HTTPClient& http, const char* url, WiFiClient& plain,
+                         WiFiClientSecure& secure) {
+  http.setTimeout(8000);
+  http.setConnectTimeout(5000);
+  if (strncmp(url, "https://", 8) == 0) {
+    secure.setInsecure();
+    return http.begin(secure, url);
+  }
+  return http.begin(plain, url);
+}
+
+static int netJsonStringArray(const char* json, const char* key, char out[][220], int maxn) {
+  char pat[20];
+  snprintf(pat, sizeof(pat), "\"%s\":[", key);
+  const char* p = strstr(json, pat);
+  if (p == nullptr) return 0;
+  p += strlen(pat);
+  int n = 0;
+  while (n < maxn && *p && *p != ']') {
+    while (*p && *p != '"' && *p != ']') p++;
+    if (*p == ']') break;
+    if (*p != '"') break;
+    p++;
+    int o = 0;
+    while (*p && *p != '"' && o + 1 < 220) {
+      if (*p == '\\' && p[1]) {
+        p++;
+        out[n][o++] = *p++;
+        continue;
+      }
+      out[n][o++] = *p++;
+    }
+    out[n][o] = 0;
+    if (o > 0) n++;
+    if (*p == '"') p++;
+  }
+  return n;
+}
+
+static void netApplyUploads(const char* json) {
+  char tmp[NET_UPLOAD_MAX][220];
+  int n = netJsonStringArray(json, "uploads", tmp, NET_UPLOAD_MAX);
+  if (n <= 0) return;
+  netUploadN = n;
+  for (int i = 0; i < n; i++) {
+    netCopy(netUploadUrls[i], sizeof(netUploadUrls[i]), tmp[i]);
+  }
+}
+
 static int netJsonInt(const char* json, const char* key, int fallback) {
   char pat[24];
   snprintf(pat, sizeof(pat), "\"%s\":", key);
@@ -132,6 +202,17 @@ static void netJoin() {
   WiFi.begin(netSsid, netPass);
 }
 
+static bool netApiUrl(char* out, int cap, const char* leaf) {
+  const char* src = netUploadBase();
+  const char* slash = strrchr(src, '/');
+  if (slash == nullptr) return false;
+  int n = (int)(slash - src + 1);
+  if (n <= 0 || n >= cap) return false;
+  memcpy(out, src, n);
+  snprintf(out + n, cap - n, "%s", leaf);
+  return true;
+}
+
 static void netUse(const char* ssid, const char* pass) {
   netCopy(netSsid, sizeof(netSsid), ssid);
   netCopy(netPass, sizeof(netPass), pass);
@@ -141,20 +222,15 @@ static void netUse(const char* ssid, const char* pass) {
 }
 
 static void netPullWifi() {
-  char url[180];
-  const char* src = NET_URL;
-  const char* slash = strrchr(src, '/');
-  if (slash == nullptr) return;
-  int n = (int)(slash - src + 1);
-  if (n <= 0 || n >= (int)sizeof(url)) return;
-  memcpy(url, src, n);
-  snprintf(url + n, sizeof(url) - n, "wifi.php?token=%s", NET_TOKEN);
+  char url[220];
+  if (!netApiUrl(url, sizeof(url), "wifi.php?token=" NET_TOKEN)) return;
 
-  WiFiClient client;
+  WiFiClient plain;
+  WiFiClientSecure secure;
   HTTPClient http;
   http.setTimeout(4000);
   http.setConnectTimeout(3000);
-  if (!http.begin(client, url)) return;
+  if (!netHttpBegin(http, url, plain, secure)) return;
   int code = http.GET();
   if (code != 200) {
     http.end();
@@ -162,6 +238,8 @@ static void netPullWifi() {
   }
   String body = http.getString();
   http.end();
+
+  netApplyUploads(body.c_str());
 
   char ssid[33];
   char pass[65];
@@ -257,19 +335,30 @@ static bool netPost(char* json, const NetClip* batch, int n) {
   json[p++] = '}';
   json[p] = 0;
 
-  WiFiClient client;
-  HTTPClient http;
-  http.setTimeout(8000);
-  http.setConnectTimeout(5000);
-  if (!http.begin(client, NET_URL)) {
-    netFailCode = -1;
-    return false;
+  if (netUploadN <= 0) netInitUploads();
+  WiFiClient plain;
+  WiFiClientSecure secure;
+  bool any = false;
+  int lastCode = 0;
+  for (int u = 0; u < netUploadN; u++) {
+    const char* target = netUploadUrls[u];
+    if (target[0] == '\0') continue;
+    HTTPClient http;
+    if (!netHttpBegin(http, target, plain, secure)) {
+      lastCode = -1;
+      continue;
+    }
+    http.addHeader("Content-Type", "application/json");
+    int code = http.POST((uint8_t*)json, p);
+    http.end();
+    if (code == 200) {
+      any = true;
+    } else {
+      lastCode = code == 0 ? -1 : code;
+    }
   }
-  http.addHeader("Content-Type", "application/json");
-  int code = http.POST((uint8_t*)json, p);
-  http.end();
-  if (code != 200) netFailCode = code == 0 ? -1 : code;
-  return code == 200;
+  if (!any) netFailCode = lastCode == 0 ? -1 : lastCode;
+  return any;
 }
 
 static int netFwReported() {
@@ -287,17 +376,6 @@ static void netFwSave(int ver) {
   if (!prefs.begin("hallow", false)) return;
   prefs.putInt("fw", ver);
   prefs.end();
-}
-
-static bool netApiUrl(char* out, int cap, const char* leaf) {
-  const char* src = NET_URL;
-  const char* slash = strrchr(src, '/');
-  if (slash == nullptr) return false;
-  int n = (int)(slash - src + 1);
-  if (n <= 0 || n >= cap) return false;
-  memcpy(out, src, n);
-  snprintf(out + n, cap - n, "%s", leaf);
-  return true;
 }
 
 static void netFirmware() {
@@ -382,6 +460,11 @@ static void netTask(void*) {
       continue;
     }
     if (netState != 2) netRadio();
+    static bool netSynced = false;
+    if (!netSynced) {
+      netSynced = true;
+      netPullWifi();
+    }
     if (netSwitching) {
       netSwitching = false;
       netCopy(netGoodSsid, sizeof(netGoodSsid), netSsid);
@@ -435,6 +518,7 @@ static void netTask(void*) {
 }
 
 static void netBegin(const char* board) {
+  netInitUploads();
   netLoadCreds();
   if (netSsid[0] == '\0') return;
   strncpy(netBoard, board ? board : "AP", sizeof(netBoard) - 1);

@@ -12,4 +12,5 @@ $cfg = talk_config();
 echo json_encode([
     'utterances' => $items,
     'upload_url' => $cfg['upload_url'],
+    'upload_urls' => talk_upload_urls(),
 ], JSON_UNESCAPED_UNICODE);

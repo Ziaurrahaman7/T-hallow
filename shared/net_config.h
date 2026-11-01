@@ -8,6 +8,8 @@
 
 #define NET_SSID "Shefa Home"
 #define NET_PASS "lkjhgfdsa"
-#define NET_URL "http://192.168.0.101/T-hallow/api/upload.php"
+// প্রাথমিক: Laragon (PC IP বদলালে এটা + Wi-Fi সেটিংস আপডেট)
+#define NET_URL "http://192.168.0.103/T-hallow/api/upload.php"
+#define NET_URL_ALT "https://hallow.mmgbd.com/api/upload.php"
 #define NET_TOKEN "hallow"
 
