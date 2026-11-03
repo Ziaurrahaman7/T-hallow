@@ -1,6 +1,6 @@
 <?php
 
-require_once dirname(__DIR__) . '/lib/store.php';
+require_once dirname(__DIR__) . '/lib/boardnet.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -14,11 +14,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         echo '{"ok":false}';
         exit;
     }
+    $board = isset($_GET['board']) ? strtoupper((string) $_GET['board']) : '';
+    if (talk_board_ok($board)) {
+        $pick = talk_board_wifi_pick($board);
+        talk_board_wifi_ack($board);
+        echo json_encode([
+            'ok' => true,
+            'ssid' => (string) ($pick['ssid'] ?? ''),
+            'pass' => (string) ($pick['pass'] ?? ''),
+            'disconnect' => (int) ($pick['disconnect'] ?? 0),
+            'scan' => (int) ($pick['scan'] ?? 0),
+            'uploads' => talk_upload_urls(),
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     $wifi = talk_wifi_read();
     echo json_encode([
         'ok' => true,
         'ssid' => $wifi['ssid'],
         'pass' => $wifi['pass'],
+        'disconnect' => 0,
+        'scan' => 0,
         'uploads' => talk_upload_urls(),
     ], JSON_UNESCAPED_UNICODE);
     exit;
@@ -40,18 +56,14 @@ if (!is_array($body)) {
 }
 
 $ssid = trim((string) ($body['ssid'] ?? ''));
-if ($ssid === '') {
-    http_response_code(400);
-    echo '{"ok":false}';
-    exit;
+if ($ssid !== '') {
+    $current = talk_wifi_read();
+    $pass = array_key_exists('pass', $body) ? (string) $body['pass'] : '';
+    if ($pass === '') {
+        $pass = $current['pass'];
+    }
+    talk_wifi_save($ssid, $pass);
 }
-
-$current = talk_wifi_read();
-$pass = array_key_exists('pass', $body) ? (string) $body['pass'] : '';
-if ($pass === '') {
-    $pass = $current['pass'];
-}
-talk_wifi_save($ssid, $pass);
 
 $uploads = [];
 if (isset($body['uploads']) && is_array($body['uploads'])) {
@@ -72,4 +84,10 @@ if ($uploads !== []) {
     talk_servers_save($uploads);
 }
 
-echo json_encode(['ok' => true, 'ssid' => $ssid, 'uploads' => talk_upload_urls()], JSON_UNESCAPED_UNICODE);
+$wifi = talk_wifi_read();
+echo json_encode([
+    'ok' => true,
+    'ssid' => $wifi['ssid'],
+    'networks' => $wifi['networks'],
+    'uploads' => talk_upload_urls(),
+], JSON_UNESCAPED_UNICODE);

@@ -2,6 +2,7 @@
 // STA board. Upload to the board whose speaker is on GPIO7/6/15.
 // MAX98357A: BCLK=GPIO7  LRC=GPIO6  DIN=GPIO15  GND=GND  VIN=VBAT
 // INMP441: SCK=GPIO17  WS=GPIO16  SD=GPIO18  VDD=3.3V  GND=GND  L/R=GND
+// PTT: GPIO14 — button other leg to GND (both AP and STA).
 // Talks both ways. Plays AP magic A5 5A A5 5A. Own voice uses A5 5A 5A A5.
 
 #include <Arduino.h>
@@ -68,6 +69,8 @@ static void monPrintf(const char* fmt, ...) {
 }
 
 #include "../shared/netlog.h"
+#include "../shared/halow_range.h"
+#include "../shared/ptt_config.h"
 
 uint32_t rxCount = 0;
 uint32_t lastPrint = 0;
@@ -494,9 +497,7 @@ static bool sendPacket(const uint8_t *audio) {
   const int len = 18 + PAYLOAD;
 
   pumpUart();
-  SerialAH.print("AT+TXDATA=");
-  SerialAH.print(len);
-  SerialAH.print("\r\n");
+  halowTxDataLine(SerialAH, len);
   wantOk = true;
   okFlag = false;
   bool ok = waitOk(150);
@@ -515,6 +516,7 @@ static bool sendPacket(const uint8_t *audio) {
 
 void setup() {
   monBegin();
+  pttBegin();
   delay(400);
   monPrint("sta boot\n");
   SerialAH.setRxBufferSize(4096);
@@ -556,6 +558,7 @@ void setup() {
   sendAT("AT+MODE=STA");
   sendAT("AT+SSID=helmet01");
   sendAT("AT+KEYMGMT=NONE");
+  halowApplyRange(sendAT);
   sendAT("AT+PAIR=1");
   delay(2500);
   sendAT("AT+PAIR=0");
@@ -589,9 +592,10 @@ void loop() {
       }
       bool shaped = peak >= 800 && nStrong >= 8;
       if (shaped) voicedMs = millis();
-      bool voice = shaped || (voicedMs != 0 && (uint32_t)(millis() - voicedMs) < 900 && peak >= 300);
+      uint32_t nowMs = millis();
+      bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs);
       bool echo = wasTalk && peak < 250 && (uint32_t)(millis() - lastSend) < 150;
-      if (voice && !echo) {
+      if (sendVoice && !echo) {
         uint8_t payload[PAYLOAD];
         adpcmPack(pcm, payload);
         if (sendPacket(payload)) {
@@ -610,8 +614,9 @@ void loop() {
   }
 
   if (millis() - lastPrint > 1000) {
-    monPrintf("tx=%lu rx=%lu play=%lu fail=%lu q=%d spk=%d c0=%lu c1=%lu\n",
+    monPrintf("tx=%lu rx=%lu play=%lu fail=%lu q=%d spk=%d ptt=%d c0=%lu c1=%lu\n",
               txCount, rxCount, playCount, failCount, rxqN, spkOn ? 1 : 0,
+              pttPressed() ? 1 : 0,
               (unsigned long)micC0, (unsigned long)micC1);
     lastPrint = millis();
   }

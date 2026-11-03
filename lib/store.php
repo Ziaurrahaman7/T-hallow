@@ -152,49 +152,126 @@ function talk_c_quote(string $value): string
 function talk_wifi_from_header(): array
 {
     $text = (string) @file_get_contents(dirname(__DIR__) . '/shared/net_config.h');
-    $ssid = '';
-    $pass = '';
-    if (preg_match('/#define\s+NET_SSID\s+"((?:\\\\.|[^"\\\\])*)"/', $text, $m)) {
+    $networks = [];
+    if (preg_match_all(
+        '/#define\s+NET_SSID(\d*)\s+"((?:\\\\.|[^"\\\\])*)"/',
+        $text,
+        $ssids,
+        PREG_SET_ORDER
+    )) {
+        foreach ($ssids as $row) {
+            $suffix = $row[1] === '' ? '' : $row[1];
+            $ssid = stripcslashes($row[2]);
+            if ($ssid === '') {
+                continue;
+            }
+            $pass = '';
+            if (preg_match('/#define\s+NET_PASS' . preg_quote($suffix, '/') . '\s+"((?:\\\\.|[^"\\\\])*)"/', $text, $m)) {
+                $pass = stripcslashes($m[1]);
+            }
+            $networks[] = ['ssid' => $ssid, 'pass' => $pass];
+        }
+    }
+    if ($networks === [] && preg_match('/#define\s+NET_SSID\s+"((?:\\\\.|[^"\\\\])*)"/', $text, $m)) {
         $ssid = stripcslashes($m[1]);
+        $pass = '';
+        if (preg_match('/#define\s+NET_PASS\s+"((?:\\\\.|[^"\\\\])*)"/', $text, $pm)) {
+            $pass = stripcslashes($pm[1]);
+        }
+        $networks[] = ['ssid' => $ssid, 'pass' => $pass];
     }
-    if (preg_match('/#define\s+NET_PASS\s+"((?:\\\\.|[^"\\\\])*)"/', $text, $m)) {
-        $pass = stripcslashes($m[1]);
-    }
-    return ['ssid' => $ssid, 'pass' => $pass];
+
+    return $networks;
 }
 
-function talk_wifi_read(): array
+/**
+ * @param  list<array{ssid: string, pass: string}>  $rows
+ * @return list<array{ssid: string, pass: string}>
+ */
+function talk_wifi_normalize(array $rows): array
+{
+    $out = [];
+    foreach ($rows as $row) {
+        if (! is_array($row)) {
+            continue;
+        }
+        $ssid = trim((string) ($row['ssid'] ?? ''));
+        if ($ssid === '' || strlen($ssid) > 32) {
+            continue;
+        }
+        $pass = (string) ($row['pass'] ?? '');
+        if (strlen($pass) > 64) {
+            $pass = substr($pass, 0, 64);
+        }
+        $out[$ssid] = ['ssid' => $ssid, 'pass' => $pass];
+    }
+
+    return array_values($out);
+}
+
+/**
+ * @return list<array{ssid: string, pass: string}>
+ */
+function talk_wifi_networks(): array
 {
     $file = talk_wifi_file();
     if (is_file($file)) {
         $data = json_decode((string) file_get_contents($file), true);
-        if (is_array($data) && isset($data['ssid'])) {
-            return [
-                'ssid' => (string) $data['ssid'],
-                'pass' => (string) ($data['pass'] ?? ''),
-            ];
+        if (is_array($data)) {
+            if (isset($data['networks']) && is_array($data['networks'])) {
+                $list = talk_wifi_normalize($data['networks']);
+                if ($list !== []) {
+                    return array_slice($list, 0, 5);
+                }
+            }
+            if (isset($data['ssid'])) {
+                $one = talk_wifi_normalize([[
+                    'ssid' => (string) $data['ssid'],
+                    'pass' => (string) ($data['pass'] ?? ''),
+                ]]);
+                if ($one !== []) {
+                    return $one;
+                }
+            }
         }
     }
-    return talk_wifi_from_header();
+
+    $fromHeader = talk_wifi_from_header();
+
+    return array_slice($fromHeader, 0, 5);
 }
 
-function talk_wifi_save(string $ssid, string $pass): void
+function talk_wifi_read(): array
 {
-    $ssid = trim($ssid);
-    if (strlen($ssid) > 32) {
-        $ssid = substr($ssid, 0, 32);
+    $networks = talk_wifi_networks();
+    $first = $networks[0] ?? ['ssid' => '', 'pass' => ''];
+
+    return [
+        'ssid' => $first['ssid'],
+        'pass' => $first['pass'],
+        'networks' => $networks,
+    ];
+}
+
+/**
+ * @param  list<array{ssid: string, pass: string}>  $networks
+ */
+function talk_wifi_write(array $networks): void
+{
+    $networks = talk_wifi_normalize($networks);
+    if ($networks === []) {
+        return;
     }
-    if (strlen($pass) > 64) {
-        $pass = substr($pass, 0, 64);
-    }
+    $networks = array_slice($networks, 0, 5);
     $dir = talk_paths()['root'];
-    if (!is_dir($dir)) {
+    if (! is_dir($dir)) {
         mkdir($dir, 0777, true);
     }
     file_put_contents(
         talk_wifi_file(),
-        json_encode(['ssid' => $ssid, 'pass' => $pass], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
+        json_encode(['networks' => $networks], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
     );
+    $first = $networks[0];
     $path = dirname(__DIR__) . '/shared/net_config.h';
     $text = @file_get_contents($path);
     if ($text === false) {
@@ -203,13 +280,39 @@ function talk_wifi_save(string $ssid, string $pass): void
     $lines = preg_split("/\r\n|\n|\r/", $text);
     foreach ($lines as $i => $line) {
         if (strpos(ltrim($line), '#define NET_SSID ') === 0) {
-            $lines[$i] = '#define NET_SSID ' . talk_c_quote($ssid);
+            $lines[$i] = '#define NET_SSID ' . talk_c_quote($first['ssid']);
         }
         if (strpos(ltrim($line), '#define NET_PASS ') === 0) {
-            $lines[$i] = '#define NET_PASS ' . talk_c_quote($pass);
+            $lines[$i] = '#define NET_PASS ' . talk_c_quote($first['pass']);
         }
     }
     file_put_contents($path, implode("\n", $lines) . "\n");
+}
+
+function talk_wifi_save(string $ssid, string $pass): void
+{
+    $ssid = trim($ssid);
+    if ($ssid === '') {
+        return;
+    }
+    $networks = talk_wifi_networks();
+    $rest = [];
+    foreach ($networks as $row) {
+        if ($row['ssid'] !== $ssid) {
+            $rest[] = $row;
+        }
+    }
+    array_unshift($rest, ['ssid' => $ssid, 'pass' => $pass]);
+    talk_wifi_write($rest);
+}
+
+/**
+ * @param  list<array{ssid: string, pass: string}>  $extra
+ */
+function talk_wifi_merge(array $extra): void
+{
+    $merged = talk_wifi_normalize(array_merge($extra, talk_wifi_networks()));
+    talk_wifi_write($merged);
 }
 
 function talk_bangla_day(int $unix): string

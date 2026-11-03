@@ -325,6 +325,16 @@ $who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
     margin-top: 4px;
   }
   #wifiMsg { color: var(--sta); font-size: 14px; min-height: 20px; }
+  .wifilist { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  .wifi textarea {
+    font: inherit;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    resize: vertical;
+  }
   .url-chip { display: inline-block; margin: 2px 4px 2px 0; font-size: 11px; word-break: break-all; }
   .fwrow { display: flex; flex-wrap: wrap; gap: 8px; }
   #fwApMsg, #fwStaMsg { color: var(--sta); font-size: 14px; min-height: 20px; }
@@ -501,7 +511,8 @@ $who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
   </div>
   <nav>
     <button type="button" class="menu on" data-panel="talk">কথোপকথন</button>
-    <button type="button" class="menu" data-panel="wifi">Wi-Fi সেটিংস</button>
+    <button type="button" class="menu" onclick="location.href='net.php'">বোর্ড Wi-Fi</button>
+    <button type="button" class="menu" data-panel="wifi">সার্ভার ঠিকানা</button>
     <button type="button" class="menu" data-panel="fw">বোর্ড আপডেট</button>
   </nav>
   <div class="navfoot">
@@ -545,21 +556,15 @@ $who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
   </div>
   <div class="view" id="panelWifi" hidden>
     <form id="wifiForm" class="sheet wifi">
-      <h2>Wi-Fi সেটিংস</h2>
-      <p>নাম আর পাসওয়ার্ড সেভ করুন। বোর্ড নেটে থাকলে কথা থামার পর নিজে নিয়ে নেবে। পাসওয়ার্ড খালি রাখলে আগেরটাই থাকবে।</p>
-      <label>Wi-Fi নাম
-        <input id="wifiSsid" maxlength="32" required value="<?php echo htmlspecialchars(talk_wifi_read()['ssid'], ENT_QUOTES, 'UTF-8'); ?>">
-      </label>
-      <label>পাসওয়ার্ড
-        <input id="wifiPass" type="password" maxlength="64" placeholder="খালি রাখলে আগেরটা থাকবে" autocomplete="new-password">
-      </label>
+      <h2>সার্ভার ঠিকানা</h2>
+      <p>AP/STA-র Wi-Fi বেছে নিতে <a href="net.php">বোর্ড Wi-Fi</a> পাতা খুলুন। এখানে শুধু কথা কোথায় পাঠাবে সেটা।</p>
       <label>ড্যাশবোর্ড ১ (কথা পাঠানোর ঠিকানা)
         <input id="uploadUrl" type="url" maxlength="220" required value="<?php echo htmlspecialchars($upload, ENT_QUOTES, 'UTF-8'); ?>">
       </label>
       <label>ড্যাশবোর্ড ২ (ঐচ্ছিক — লোকাল + সার্ভার দুটো)
         <input id="uploadUrl2" type="url" maxlength="220" placeholder="https://hallow.mmgbd.com/api/upload.php" value="<?php echo htmlspecialchars($upload2, ENT_QUOTES, 'UTF-8'); ?>">
       </label>
-      <button type="submit">Wi-Fi সেভ</button>
+      <button type="submit">ঠিকানা সেভ</button>
       <span id="wifiMsg"></span>
     </form>
   </div>
@@ -854,8 +859,6 @@ wifiForm.addEventListener('submit', async (event) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        ssid: document.getElementById('wifiSsid').value,
-        pass: document.getElementById('wifiPass').value,
         upload_url: document.getElementById('uploadUrl').value,
         upload_url2: document.getElementById('uploadUrl2').value
       })
@@ -863,8 +866,7 @@ wifiForm.addEventListener('submit', async (event) => {
     if (gone(res)) return;
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error('bad');
-    document.getElementById('wifiPass').value = '';
-    wifiMsg.textContent = 'সেভ হয়েছে। বোর্ড নেটে থাকলে নিজে নিয়ে নেবে।';
+    wifiMsg.textContent = 'সেভ হয়েছে।';
   } catch (e) {
     wifiMsg.textContent = 'সেভ হয়নি।';
     wifiMsg.style.color = 'var(--danger)';
@@ -873,7 +875,7 @@ wifiForm.addEventListener('submit', async (event) => {
 
 const panels = {
   talk: ['কথোপকথন', 'গ্রুপ চ্যাট। যে যখন ভয়েস দেয়, সেই সময়ে এখানে আসে।'],
-  wifi: ['Wi-Fi সেটিংস', 'Wi-Fi ও ড্যাশবোর্ড ঠিকানা। বোর্ড কথা দুটো সার্ভারে পাঠাতে পারে।'],
+  wifi: ['সার্ভার ঠিকানা', 'কথা কোন URL-এ যাবে। Wi-Fi বোর্ডের জন্য আলাদা পাতা।'],
   fw: ['বোর্ড আপডেট', 'ফাইল রাখুন, তারপর বোর্ডে পাঠান। বোর্ড কথা থামলে নিজে নেবে।']
 };
 document.querySelectorAll('button.menu').forEach((btn) => {

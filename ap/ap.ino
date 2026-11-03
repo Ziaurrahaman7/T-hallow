@@ -2,6 +2,7 @@
 // AP board. Upload to the board whose mic is on GPIO7/6/15.
 // INMP441: SCK=GPIO7  WS=GPIO6  SD=GPIO15  VDD=3.3V  GND=GND  L/R=GND
 // MAX98357A: BCLK=GPIO17  LRC=GPIO16  DIN=GPIO18  VIN=VBAT  GND=GND
+// PTT: GPIO14 — button other leg to GND (both AP and STA).
 // Talks both ways. Own voice uses magic A5 5A A5 5A. Plays STA magic A5 5A 5A A5.
 
 #include <Arduino.h>
@@ -60,6 +61,8 @@ static void monPrintf(const char* fmt, ...) {
 }
 
 #include "../shared/netlog.h"
+#include "../shared/halow_range.h"
+#include "../shared/ptt_config.h"
 
 static int16_t ring[RING];
 static volatile int wpos = 0;
@@ -514,9 +517,7 @@ bool sendPacket(const uint8_t *audio) {
   const int len = 18 + PAYLOAD;
 
   pumpUart();
-  SerialAH.print("AT+TXDATA=");
-  SerialAH.print(len);
-  SerialAH.print("\r\n");
+  halowTxDataLine(SerialAH, len);
   wantOk = true;
   okFlag = false;
   bool ok = waitOk(150);
@@ -566,6 +567,7 @@ static bool setupSpeaker() {
 
 void setup() {
   monBegin();
+  pttBegin();
   delay(200);
   SerialAH.setRxBufferSize(2048);
   SerialAH.setTxBufferSize(1024);
@@ -581,6 +583,7 @@ void setup() {
   at("AT+MODE=AP");
   at("AT+SSID=helmet01");
   at("AT+KEYMGMT=NONE");
+  halowApplyRange(at);
   at("AT+PAIR=0");
 
   uint32_t t0 = millis();
@@ -627,9 +630,10 @@ void loop() {
     }
     bool shaped = peak >= 800 && nStrong >= 8;
     if (shaped) voicedMs = millis();
-    bool voice = shaped || (voicedMs != 0 && (uint32_t)(millis() - voicedMs) < 900 && peak >= 300);
+    uint32_t nowMs = millis();
+    bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs);
     bool echo = wasTalk && peak < 250 && (uint32_t)(millis() - lastSend) < 150;
-    if (voice && !echo) {
+    if (sendVoice && !echo) {
       uint8_t payload[PAYLOAD];
       adpcmPack(pcm, payload);
       if (sendPacket(payload)) {
@@ -661,12 +665,13 @@ void loop() {
     slot1Hold = 0;
     clipHold = 0;
     portEXIT_CRITICAL(&mux);
-    monPrintf("tx=%lu rx=%lu play=%lu fail=%lu peak=%d c0=%lu c1=%lu\n",
+    monPrintf("tx=%lu rx=%lu play=%lu fail=%lu peak=%d ptt=%d c0=%lu c1=%lu\n",
                   (unsigned long)txCount,
                   (unsigned long)rxCount,
                   (unsigned long)playCount,
                   (unsigned long)failCount,
                   pk,
+                  pttPressed() ? 1 : 0,
                   (unsigned long)c0,
                   (unsigned long)c1);
     lastPrint = millis();
