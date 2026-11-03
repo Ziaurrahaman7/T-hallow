@@ -71,6 +71,7 @@ static void monPrintf(const char* fmt, ...) {
 #include "../shared/netlog.h"
 #include "../shared/halow_range.h"
 #include "../shared/ptt_config.h"
+#include "../shared/voice_air.h"
 
 uint32_t rxCount = 0;
 uint32_t lastPrint = 0;
@@ -152,9 +153,8 @@ static void micTask(void *) {
       uint32_t a1 = mag32(raw[i + 1]);
       if (a0 > m0) m0 = a0;
       if (a1 > m1) m1 = a1;
-      int32_t s = 0;
-      if (a0 <= 0x70000000UL && a0 > 0) s = raw[i];
-      else if (a1 <= 0x70000000UL && a1 > 0) s = raw[i + 1];
+      bool bad0 = a0 > 0x70000000UL;
+      int32_t s = bad0 ? 0 : raw[i];
       sum += s;
       got++;
       if (got < DECIM) continue;
@@ -371,9 +371,10 @@ static void speakerIdle() {
 }
 
 void playPacket(uint8_t* p) {
+  if (!voiceAirPayloadOk(p)) return;
+
   static uint8_t lastPkt[SAMPLES];
   static bool haveLast = false;
-  rxCount++;
   if (haveLast && memcmp(lastPkt, p, SAMPLES) == 0) return;
   memcpy(lastPkt, p, SAMPLES);
   haveLast = true;
@@ -388,6 +389,9 @@ void playPacket(uint8_t* p) {
     if (a > peak) peak = a;
     if (a >= 400) strong++;
   }
+  if (peak < 280 || strong < 5) return;
+
+  rxCount++;
   bool start = peak >= 600 && strong >= 8;
   if (start) phraseMs = millis();
   bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 900;
@@ -413,11 +417,8 @@ void playPacket(uint8_t* p) {
   playCount++;
 }
 
-static int matched = 0;
-static int pktIdx = 0;
-static bool collecting = false;
-static uint8_t airPkt[SAMPLES];
-static uint8_t rxq[12][SAMPLES];
+static VoiceAirRx airRx;
+static uint8_t rxq[8][SAMPLES];
 static int rxqN = 0;
 
 static void feedByte(uint8_t b) {
@@ -426,38 +427,26 @@ static void feedByte(uint8_t b) {
     if (prev == 'O' && b == 'K') okFlag = true;
     prev = b;
   }
-  if (!collecting) {
-    if (b == PLAY_MAGIC[matched]) {
-      matched++;
-      if (matched == 4) {
-        collecting = true;
-        pktIdx = 0;
-        matched = 0;
-      }
+  bool ready = false;
+  if (voiceAirFeed(&airRx, b, &ready) && ready) {
+    if (rxqN < 4) {
+      memcpy(rxq[rxqN], airRx.body, SAMPLES);
+      rxqN++;
     } else {
-      matched = (b == PLAY_MAGIC[0]) ? 1 : 0;
-    }
-  } else {
-    airPkt[pktIdx++] = b;
-    if (pktIdx >= SAMPLES) {
-      if (rxqN < 12) {
-        memcpy(rxq[rxqN], airPkt, SAMPLES);
-        rxqN++;
-      }
-      collecting = false;
+      memmove(rxq[0], rxq[1], 3 * SAMPLES);
+      memcpy(rxq[3], airRx.body, SAMPLES);
     }
   }
 }
 
 static void flushReceiveAudio() {
   rxqN = 0;
-  matched = 0;
-  collecting = false;
-  pktIdx = 0;
+  voiceAirRxReset(&airRx);
+  voiceAirRxClearDedup(&airRx);
 }
 
 static void playQueued() {
-  for (int drain = 0; rxqN > 0 && drain < 6; drain++) {
+  for (int drain = 0; rxqN > 0 && drain < 2; drain++) {
     uint8_t tmp[SAMPLES];
     memcpy(tmp, rxq[0], SAMPLES);
     if (rxqN > 1) memmove(rxq[0], rxq[1], (size_t)(rxqN - 1) * SAMPLES);
@@ -496,12 +485,10 @@ static void drainQuiet() {
 }
 
 static bool sendPacket(const uint8_t *audio) {
-  static uint8_t frame[14 + 4 + PAYLOAD];
+  static uint8_t frame[14 + 6 + PAYLOAD];
   memset(frame, 0xFF, 6);
   memset(frame + 6, 0, 8);
-  memcpy(frame + 14, OWN_MAGIC, 4);
-  memcpy(frame + 18, audio, PAYLOAD);
-  const int len = 18 + PAYLOAD;
+  const int len = voiceAirBuildFrame(frame, 14, audio, PAYLOAD);
 
   pumpUart();
   halowTxDataLine(SerialAH, len);
@@ -569,7 +556,13 @@ void setup() {
   sendAT("AT+PAIR=1");
   delay(2500);
   sendAT("AT+PAIR=0");
-  monPrint("COM5 listening\n");
+  for (int i = 0; i < 150; i++) {
+    pumpUart();
+    delay(8);
+  }
+  flushReceiveAudio();
+  speakerClose();
+  monPrint("sta listen\n");
   netBegin("STA");
 }
 
