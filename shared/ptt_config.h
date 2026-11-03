@@ -14,6 +14,25 @@
 #define PTT_REQUIRED 1
 #endif
 
+// Walkie-style: no speaker while you transmit; no mic TX while remote plays (reduces echo).
+#ifndef PTT_HALF_DUPLEX
+#define PTT_HALF_DUPLEX 1
+#endif
+
+#ifndef PLAY_GAIN_NUM
+#define PLAY_GAIN_NUM 7
+#endif
+#ifndef PLAY_GAIN_DEN
+#define PLAY_GAIN_DEN 8
+#endif
+
+static inline int16_t playSample(int16_t s) {
+  int32_t v = ((int32_t)s * PLAY_GAIN_NUM) / PLAY_GAIN_DEN;
+  if (v > 32767) v = 32767;
+  if (v < -32768) v = -32768;
+  return (int16_t)v;
+}
+
 static inline void pttBegin() {
 #if PTT_REQUIRED
   pinMode(PTT_GPIO, INPUT_PULLUP);

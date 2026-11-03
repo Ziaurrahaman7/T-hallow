@@ -394,7 +394,7 @@ static void speakerClose() {
 }
 
 static void speakerIdle() {
-  if (spkOn && phraseMs != 0 && (uint32_t)(millis() - phraseMs) > 1400) speakerClose();
+  if (spkOn && phraseMs != 0 && (uint32_t)(millis() - phraseMs) > 900) speakerClose();
 }
 
 static void playPacket(uint8_t* p) {
@@ -417,7 +417,7 @@ static void playPacket(uint8_t* p) {
   }
   bool start = peak >= 600 && strong >= 8;
   if (start) phraseMs = millis();
-  bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 1400;
+  bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 900;
   if (!phrase) return;
   speakerOpen();
   if (!spkOn) return;
@@ -430,11 +430,11 @@ static void playPacket(uint8_t* p) {
 
   static int16_t stereo[PCM_N * 2];
   for (int i = 0; i < PCM_N; i++) {
-    int16_t s = (int16_t)(pcm[i] / 2);
+    int16_t s = playSample(pcm[i]);
     stereo[i * 2] = s;
     stereo[i * 2 + 1] = s;
   }
-  lastOut = (int16_t)(pcm[PCM_N - 1] / 2);
+  lastOut = playSample(pcm[PCM_N - 1]);
   size_t w = 0;
   i2s_channel_write(spk, stereo, sizeof(stereo), &w, 80);
   playCount++;
@@ -467,6 +467,13 @@ static void feedByte(uint8_t b) {
       collecting = false;
     }
   }
+}
+
+static void flushReceiveAudio() {
+  rxqN = 0;
+  matched = 0;
+  collecting = false;
+  pktIdx = 0;
 }
 
 static void playQueued() {
@@ -607,7 +614,16 @@ void setup() {
 void loop() {
   netPoll();
   pumpUart();
+#if PTT_HALF_DUPLEX
+  if (pttPressed()) {
+    flushReceiveAudio();
+    speakerClose();
+  } else {
+    playQueued();
+  }
+#else
   playQueued();
+#endif
   speakerIdle();
   int16_t pcm[PCM_N];
   if (!takePacket(pcm)) {
@@ -632,7 +648,9 @@ void loop() {
     if (shaped) voicedMs = millis();
     uint32_t nowMs = millis();
     bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs);
-    bool echo = wasTalk && peak < 250 && (uint32_t)(millis() - lastSend) < 150;
+    bool remotePlay = spkOn || wasTalk;
+    bool echo = (wasTalk && peak < 250 && (nowMs - lastSend) < 150)
+                || (PTT_HALF_DUPLEX && remotePlay);
     if (sendVoice && !echo) {
       uint8_t payload[PAYLOAD];
       adpcmPack(pcm, payload);
