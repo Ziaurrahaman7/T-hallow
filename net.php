@@ -1,7 +1,10 @@
 <?php
 require_once __DIR__ . '/lib/boardnet.php';
+require_once __DIR__ . '/lib/store.php';
 header('Cache-Control: no-store');
 talk_session_start();
+$boardApi = talk_device_upload_url();
+$lanHint = talk_lan_base() ?? talk_base_url();
 
 if (! talk_logged_in()) {
     header('Location: index.php');
@@ -177,6 +180,8 @@ $who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
     background: #fafafa;
   }
   .join.show { display: block; }
+  .row.pending-row { background: #e8f4fc; cursor: default; }
+  .row.pending-row .row-text span { color: #0067c0; }
   .join label { display: block; font-size: 12px; color: var(--win-muted); margin-bottom: 6px; }
   .join input {
     width: 100%;
@@ -231,7 +236,15 @@ $who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
 <div class="top">
   <div>
     <h1>বোর্ড Wi-Fi</h1>
-    <p>Windows-এর মতো: বোর্ডের কাছে যে নেটওয়ার্ক আছে সেটাই তালিকায়। নামে ক্লিক → পাসওয়ার্ড → সংযোগ।</p>
+    <p><strong>ফোন/PC Wi-Fi list-এর মতো</strong>, কিন্তু তালিকা = <strong>ওই বোর্ডের কাছে</strong> যে নেট আছে (ল্যাপটপের list নয়)।</p>
+    <p style="font-size:13px;color:var(--muted);max-width:640px;line-height:1.55;margin-top:8px">
+      উদাহরণ: এক বোর্ড <strong>বাড়িতে</strong>, এক বোর্ড <strong>ঢাকায়</strong> — AP প্যানেলে বাড়ির আশেপাশের নাম, STA প্যানেলে ঢাকার আশেপাশের নাম।
+      নামে ক্লিক → পাস → Connect = শুধু <strong>সেই বোর্ডে</strong> Wi-Fi সেট হবে।
+    </p>
+    <p style="font-size:12px;color:#a16207;max-width:640px;line-height:1.5;margin-top:8px">
+      তালিকায় শুধু <strong>বোর্ড scan</strong> — আগে থেকে কোনো নাম লাগে না (ফোনের মতো)। বোর্ড একবার অ্যাডমিন সার্ভারে পৌঁছালেই তালিকা আসে; না হলে «নাম লিখে সংযোগ» (SSID+pass) → online হলে apply।
+    </p>
+    <p style="margin-top:8px;font-size:12px;color:#9db5a6">লোকাল API: <?php echo htmlspecialchars($boardApi, ENT_QUOTES, 'UTF-8'); ?></p>
   </div>
   <div><?php echo $who; ?> · <a href="index.php">ড্যাশবোর্ড</a></div>
 </div>
@@ -294,13 +307,24 @@ function buildPane(id, row) {
 
   const seen = new Set();
   if (row.connected && row.live_ssid) seen.add(row.live_ssid);
+
+  if (row.pick_ssid && !(row.connected && row.live_ssid === row.pick_ssid)) {
+    seen.add(row.pick_ssid);
+    const pr = document.createElement('div');
+    pr.className = 'row pending-row';
+    pr.innerHTML = sigHtml(-55) + '<div class="row-text"><strong></strong><span>সেভ করা — password দিয়ে Connect, বোর্ড online হলে যুক্ত</span></div>';
+    pr.querySelector('strong').textContent = row.pick_ssid;
+    pr.addEventListener('click', () => pickNetwork(win, row.pick_ssid));
+    scroll.appendChild(pr);
+  }
+
   const list = row.scan || [];
-  if (list.length === 0) {
+  if (list.length === 0 && seen.size === 0) {
     const em = document.createElement('div');
     em.className = 'empty';
-    em.textContent = 'বোর্ড এখনো তালিকা পাঠায়নি। বোর্ড চালু রাখুন; একবার Wi-Fi/সার্ভারে পৌঁছালে এখানে নামগুলো দেখাবে। নিচে «নাম লিখে সংযোগ» ব্যবহার করতে পারেন।';
+    em.textContent = 'বোর্ড scan list এখনো নেই। «নাম লিখে সংযোগ» → SSID → নিচে password → Connect (শুধু নাম লিখলে save হয় না)।';
     scroll.appendChild(em);
-  } else {
+  } else if (list.length > 0) {
     list.forEach((n) => {
       if (seen.has(n.ssid)) return;
       seen.add(n.ssid);
@@ -319,10 +343,15 @@ function buildPane(id, row) {
   const join = document.createElement('div');
   join.className = 'join';
   join.innerHTML = `
-    <label>নেটওয়ার্কের পাসওয়ার্ড</label>
-    <input type="password" class="pass" maxlength="64" autocomplete="new-password" placeholder="পাসওয়ার্ড">
-    <input type="hidden" class="ssid">
-    <button type="button" class="go">Connect</button>`;
+    <label>Wi-Fi নাম (SSID)</label>
+    <input type="text" class="ssid" maxlength="32" autocomplete="off" placeholder="Redmi 13C">
+    <label>পাসওয়ার্ড</label>
+    <input type="password" class="pass" maxlength="64" autocomplete="off" placeholder="হটস্পট/নেটের পাস">
+    <button type="button" class="go">Connect — সেভ করুন</button>`;
+  if (row.pick_ssid) {
+    join.classList.add('show');
+    join.querySelector('.ssid').value = row.pick_ssid;
+  }
   win.appendChild(join);
 
   const toast = document.createElement('div');
@@ -331,7 +360,9 @@ function buildPane(id, row) {
 
   const stale = document.createElement('div');
   stale.className = 'stale';
-  stale.textContent = 'স্ক্যান: ' + fmtAgo(row.scan_at) + ' · বোর্ড খবর: ' + fmtAgo(row.live_at);
+  let st = 'স্ক্যান: ' + fmtAgo(row.scan_at) + ' · বোর্ড: ' + fmtAgo(row.live_at);
+  if (row.pick_ssid) st += ' · সেট: ' + row.pick_ssid;
+  stale.textContent = st;
   win.appendChild(stale);
 
   const foot = document.createElement('div');
@@ -354,8 +385,15 @@ function buildPane(id, row) {
   join.querySelector('.go').addEventListener('click', () => {
     const ssid = join.querySelector('.ssid').value.trim();
     const pass = join.querySelector('.pass').value;
-    if (!ssid) return;
-    api(id, { action: 'connect', ssid, pass }, toast);
+    if (!ssid) {
+      toast.textContent = 'SSID লিখুন।';
+      return;
+    }
+    if (!pass) {
+      toast.textContent = 'পাসওয়ার্ড লিখে Connect চাপুন।';
+      return;
+    }
+    api(id, { action: 'connect', ssid, pass }, toast, ssid);
   });
 
   wrap.appendChild(win);
@@ -374,7 +412,7 @@ function pickNetwork(win, ssid) {
   join.querySelector('.pass').focus();
 }
 
-async function api(board, body, toast) {
+async function api(board, body, toast, ssidLabel) {
   try {
     const res = await fetch('api/net.php', {
       method: 'POST',
@@ -382,28 +420,81 @@ async function api(board, body, toast) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ board, ...body })
     });
-    const data = await res.json();
-    if (!data.ok) throw new Error('x');
-    if (toast) toast.textContent = body.action === 'connect' ? 'সেট করা হয়েছে। বোর্ড কয়েক সেকেন্ডে যুক্ত হবে।' : 'পাঠানো হয়েছে।';
-    await refresh();
+    let data = {};
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (res.status === 401 || data.err === 'login') {
+      if (toast) toast.textContent = 'Login শেষ — index.php থেকে আবার ঢুকুন।';
+      setTimeout(() => { window.location.href = 'index.php'; }, 1500);
+      return;
+    }
+    if (!res.ok || !data.ok) throw new Error('x');
+    if (toast) {
+      if (body.action === 'connect') {
+        const n = ssidLabel || body.ssid || '';
+        toast.textContent = n ? ('সেভ: «' + n + '» — বোর্ড online হলে যুক্ত হবে।') : 'সেভ হয়েছে।';
+      } else {
+        toast.textContent = 'পাঠানো হয়েছে।';
+      }
+    }
+    refreshPauseUntil = Date.now() + 5000;
+    if (data.boards) {
+      paintBoards(data.boards);
+    } else {
+      await refresh(true);
+    }
   } catch {
-    if (toast) toast.textContent = 'হয়নি, আবার চেষ্টা করুন।';
+    if (toast) toast.textContent = 'সেভ হয়নি — SSID+password দিয়ে Connect চাপুন; Laragon Apache চালু আছে কিনা দেখুন।';
   }
 }
 
-async function refresh() {
-  const res = await fetch('api/net.php', { credentials: 'same-origin' });
-  const data = await res.json();
-  if (!data.ok) return;
+let refreshPaused = false;
+let refreshPauseUntil = 0;
+
+function userIsTypingWifi() {
+  const el = document.activeElement;
+  if (!el || !el.closest) return false;
+  return el.closest('.join') && (el.classList.contains('pass') || el.classList.contains('ssid'));
+}
+
+function paintBoards(boards) {
+  if (userIsTypingWifi() || Date.now() < refreshPauseUntil) {
+    return;
+  }
   const root = document.getElementById('boards');
   root.innerHTML = '';
-  for (const [id, row] of Object.entries(data.boards)) {
+  for (const [id, row] of Object.entries(boards)) {
     root.appendChild(buildPane(id, row));
   }
 }
 
-refresh();
-setInterval(refresh, 6000);
+async function refresh(force) {
+  if (!force && (refreshPaused || userIsTypingWifi() || Date.now() < refreshPauseUntil)) {
+    return;
+  }
+  const res = await fetch('api/net.php', { credentials: 'same-origin' });
+  if (res.status === 401) {
+    window.location.href = 'index.php';
+    return;
+  }
+  const data = await res.json();
+  if (!data.ok) return;
+  paintBoards(data.boards);
+}
+
+document.addEventListener('focusin', (e) => {
+  if (e.target && e.target.closest && e.target.closest('.join')) {
+    refreshPaused = true;
+  }
+});
+document.addEventListener('focusout', (e) => {
+  if (e.target && e.target.closest && e.target.closest('.join')) {
+    refreshPauseUntil = Date.now() + 8000;
+    setTimeout(() => { refreshPaused = false; }, 8000);
+  }
+});
+
+refresh(true);
+setInterval(() => refresh(false), 12000);
 </script>
 </body>
 </html>

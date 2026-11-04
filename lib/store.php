@@ -7,6 +7,32 @@ function talk_live_upload_url(): string
     return 'https://hallow.mmgbd.com/api/upload.php';
 }
 
+/** PC LAN URL so boards (not on localhost) can reach Laragon. data/local.json */
+function talk_lan_base(): ?string
+{
+    $file = talk_paths()['root'].'/local.json';
+    if (! is_file($file)) {
+        return null;
+    }
+    $data = json_decode((string) file_get_contents($file), true);
+    if (! is_array($data)) {
+        return null;
+    }
+    $base = trim((string) ($data['lan_base'] ?? ''));
+
+    return $base !== '' ? rtrim($base, '/') : null;
+}
+
+function talk_device_upload_url(): string
+{
+    $lan = talk_lan_base();
+    if ($lan !== null) {
+        return $lan.'/api/upload.php';
+    }
+
+    return talk_config()['upload_url'];
+}
+
 function talk_base_url(): ?string
 {
     if (PHP_SAPI === 'cli' || empty($_SERVER['HTTP_HOST'])) {
@@ -50,6 +76,9 @@ function talk_servers_file(): string
  */
 function talk_servers_default_uploads(): array
 {
+    if (talk_lan_base() !== null) {
+        return [talk_device_upload_url()];
+    }
     $self = talk_config()['upload_url'];
     $live = talk_live_upload_url();
     if (rtrim($self, '/') === rtrim($live, '/')) {
@@ -683,6 +712,20 @@ function talk_auth_read(): array
     ];
 }
 
+function talk_session_path(): string
+{
+    $sn = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+    if (preg_match('#^(.+)/(api|lib)/#', $sn, $m)) {
+        return $m[1].'/';
+    }
+    $dir = dirname($sn);
+    if ($dir === '/' || $dir === '.' || $dir === '') {
+        return '/';
+    }
+
+    return rtrim($dir, '/').'/';
+}
+
 function talk_session_start(): void
 {
     if (session_status() === PHP_SESSION_ACTIVE) {
@@ -691,7 +734,7 @@ function talk_session_start(): void
     session_name('HALLOWSESS');
     session_set_cookie_params([
         'lifetime' => 0,
-        'path' => '/',
+        'path' => talk_session_path(),
         'httponly' => true,
         'samesite' => 'Lax',
     ]);
@@ -721,6 +764,6 @@ function talk_require_web(): void
     http_response_code(401);
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
-    echo '{"ok":false}';
+    echo '{"ok":false,"err":"login"}';
     exit;
 }

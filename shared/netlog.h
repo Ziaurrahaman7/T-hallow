@@ -34,6 +34,7 @@ static volatile int netState = 0;
 static volatile int netSent = 0;
 static volatile int netFailCode = 0;
 static volatile int netHold = 0;
+static volatile int netHttpHint = 0;
 
 static void netKeep(const uint8_t* data, int n, char who, bool mine) {
   if (netClips == nullptr || data == nullptr || n < 163) return;
@@ -270,6 +271,24 @@ static void netJoin() {
   WiFi.begin(netSsid, netPass);
 }
 
+// No server yet: try saved creds, then NET_SSID2, then compile-time NET_SSID (e.g. phone hotspot).
+static void netJoinRotate() {
+  netApplyRadioProfile();
+  static uint8_t phase = 0;
+  phase = (uint8_t)((phase + 1) % 3);
+  if (phase == 0 && netSsid[0] != 0) {
+    WiFi.begin(netSsid, netPass);
+    return;
+  }
+  if (phase == 1 && NET_SSID2[0] != '\0') {
+    WiFi.begin(NET_SSID2, NET_PASS2);
+    return;
+  }
+  if (NET_SSID[0] != '\0') {
+    WiFi.begin(NET_SSID, NET_PASS);
+  }
+}
+
 static void netUse(const char* ssid, const char* pass) {
   if (ssid == nullptr || ssid[0] == 0) return;
   if (strcmp(ssid, netSsid) == 0 && strcmp(pass ? pass : "", netPass) == 0) return;
@@ -312,6 +331,7 @@ static bool netPostLeaf(const char* leaf, const char* body, int len) {
     int code = http.POST((uint8_t*)body, len);
     http.end();
     if (code == 200) return true;
+    if (code > 0) netHttpHint = code;
   }
   return false;
 }
@@ -331,6 +351,12 @@ static void netReport() {
       netScanJson[0] ? netScanJson : "[]");
   if (len <= 0 || len >= (int)sizeof(rep)) return;
   netPostLeaf("net.php", rep, len);
+}
+
+static void netReportSoon() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  netScanFill();
+  netReport();
 }
 
 static void netReportScanOnly() {
@@ -359,6 +385,7 @@ static void netPullWifi() {
     if (!netHttpBegin(http, url, plain, secure)) continue;
     int code = http.GET();
     if (code != 200) {
+      if (code > 0) netHttpHint = code;
       http.end();
       continue;
     }
@@ -366,7 +393,10 @@ static void netPullWifi() {
     http.end();
     if (body.length() > 0) break;
   }
-  if (body.length() == 0) return;
+  if (body.length() == 0) {
+    if (netHttpHint == 0) netHttpHint = -2;
+    return;
+  }
 
   netApplyUploads(body.c_str());
 
@@ -375,7 +405,7 @@ static void netPullWifi() {
     netState = 1;
   }
   if (netJsonInt(body.c_str(), "scan", 0) == 1) {
-    netReportScanOnly();
+    netReportSoon();
   }
 
   char ssid[33];
@@ -383,6 +413,7 @@ static void netPullWifi() {
   pass[0] = 0;
   if (!netJsonField(body.c_str(), "ssid", ssid, sizeof(ssid)) || ssid[0] == 0) return;
   netJsonField(body.c_str(), "pass", pass, sizeof(pass));
+  monPrintf("net dashboard ssid=%s\n", ssid);
   netUse(ssid, pass);
 }
 
@@ -580,10 +611,10 @@ static void netTask(void*) {
           WiFi.disconnect(false, false);
           vTaskDelay(pdMS_TO_TICKS(200));
         }
-        netJoin();
+        netJoinRotate();
       }
       static uint32_t netScanIdle = 0;
-      if (millis() - netScanIdle > 25000) {
+      if (millis() - netScanIdle > 20000) {
         netScanIdle = millis();
         netScanFill();
       }
@@ -614,7 +645,6 @@ static void netTask(void*) {
       stale = oldest > 0 && (uint32_t)(now - oldest) > 8000;
     }
     netHold = idle || stale ? 0 : netStored;
-    static uint32_t netWifiPoll = 0;
     if (netStored > 0 && (idle || stale)) {
       int n = netTake(batch, NET_BATCH);
       if (n > 0) {
@@ -628,12 +658,13 @@ static void netTask(void*) {
         }
       }
     }
+    static uint32_t netWifiPoll = 0;
     static uint32_t netRepPoll = 0;
-    if (idle && now - netWifiPoll > 15000) {
+    if (now - netWifiPoll > 12000) {
       netWifiPoll = now;
       netPullWifi();
     }
-    if (idle && now - netRepPoll > 20000) {
+    if (now - netRepPoll > 18000) {
       netRepPoll = now;
       netReport();
     }
@@ -649,7 +680,22 @@ static void netTask(void*) {
 static void netBegin(const char* board) {
   netInitUploads();
   netLoadCreds();
-  if (netSsid[0] == '\0') return;
+  if (netSsid[0] == '\0' && NET_SSID[0] == '\0' && NET_SSID2[0] == '\0') {
+    monPrint("net idle: set Wi-Fi from dashboard (net.php)\n");
+  }
+  if (netSsid[0] == '\0' && NET_SSID[0] == '\0' && NET_SSID2[0] == '\0') {
+    strncpy(netBoard, board ? board : "AP", sizeof(netBoard) - 1);
+    netBoard[sizeof(netBoard) - 1] = 0;
+    WiFi.mode(WIFI_STA);
+    netApplyRadioProfile();
+    netScanFill();
+    if (xTaskCreatePinnedToCore(netTask, "net", 32768, NULL, 1, NULL, 1) != pdPASS) {
+      monPrint("net task fail\n");
+    } else {
+      netState = 1;
+    }
+    return;
+  }
   strncpy(netBoard, board ? board : "AP", sizeof(netBoard) - 1);
   netBoard[sizeof(netBoard) - 1] = 0;
   netActiveMs = millis();
@@ -708,6 +754,11 @@ static void netPoll() {
     int code = netFailCode;
     netFailCode = 0;
     monPrintf("net fail %d\n", code);
+  }
+  if (netHttpHint != 0) {
+    int h = netHttpHint;
+    netHttpHint = 0;
+    monPrintf("net server http %d (PC firewall/Laragon?)\n", h);
   }
   if (netState == 2 && netHold > 0 && millis() - lastWait > 5000) {
     lastWait = millis();

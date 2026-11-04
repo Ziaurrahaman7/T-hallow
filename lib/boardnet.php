@@ -125,12 +125,7 @@ function talk_board_wifi_pick(string $board): array
     if ($pick['ssid'] !== '') {
         $out['ssid'] = $pick['ssid'];
         $out['pass'] = $pick['pass'];
-
-        return $out;
     }
-    $wifi = talk_wifi_read();
-    $out['ssid'] = $wifi['ssid'];
-    $out['pass'] = $wifi['pass'];
 
     return $out;
 }
