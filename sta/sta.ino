@@ -68,8 +68,10 @@ static void monPrintf(const char* fmt, ...) {
   monPrint(buf);
 }
 
-#include "../shared/netlog.h"
 #include "../shared/halow_range.h"
+#include "../shared/halow_rssi.h"
+#define NET_GET_HALOW_RSSI() ((int)g_halowPeerRssi)
+#include "../shared/netlog.h"
 #include "../shared/ptt_config.h"
 #include "../shared/voice_air.h"
 
@@ -569,6 +571,7 @@ void setup() {
 void loop() {
   netPoll();
   pumpUart();
+  halowPollPeerRssi(SerialAH, feedByte, !pttPressed() && !spkOn && rxqN == 0 && !wasTalk);
 #if PTT_HALF_DUPLEX
   if (pttPressed()) {
     flushReceiveAudio();

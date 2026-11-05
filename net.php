@@ -1,252 +1,30 @@
 <?php
 require_once __DIR__ . '/lib/boardnet.php';
 require_once __DIR__ . '/lib/store.php';
+require_once __DIR__ . '/lib/dashboard_layout.php';
 header('Cache-Control: no-store');
 talk_session_start();
 $boardApi = talk_device_upload_url();
-$lanHint = talk_lan_base() ?? talk_base_url();
 
 if (! talk_logged_in()) {
     header('Location: index.php');
     exit;
 }
 
-$who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
+talk_dash_head('বোর্ড Wi‑Fi', ['net.css']);
+talk_dash_sidebar('net', (string) $_SESSION['talk_user']);
+talk_dash_main_open();
 ?>
-<!DOCTYPE html>
-<html lang="bn">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Wi-Fi · বোর্ড</title>
-<style>
-  :root {
-    --page: #0c1812;
-    --ink: #e8f2e6;
-    --muted: #9db5a6;
-    --gold: #d4b15a;
-    --win-bg: #f3f3f3;
-    --win-ink: #1a1a1a;
-    --win-muted: #5c5c5c;
-    --win-line: #e0e0e0;
-    --win-hover: #ebebeb;
-    --win-accent: #0067c0;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    min-height: 100vh;
-    font-family: "Segoe UI", system-ui, sans-serif;
-    background: var(--page);
-    color: var(--ink);
-  }
-  a { color: var(--gold); }
-  .top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-  .top h1 { margin: 0; font-size: 20px; font-weight: 600; }
-  .top p { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 520px; }
-  .boards {
-    display: grid;
-    gap: 24px;
-    padding: 0 16px 32px;
-    max-width: 1100px;
-    margin: 0 auto;
-  }
-  @media (min-width: 780px) {
-    .boards { grid-template-columns: 1fr 1fr; align-items: start; }
-  }
-  .board-title {
-    color: var(--gold);
-    font-size: 14px;
-    font-weight: 600;
-    margin: 0 0 8px 4px;
-  }
-  .wifi-win {
-    background: var(--win-bg);
-    color: var(--win-ink);
-    border-radius: 8px;
-    box-shadow: 0 8px 32px rgba(0,0,0,.45);
-    overflow: hidden;
-    min-height: 420px;
-    display: flex;
-    flex-direction: column;
-  }
-  .wifi-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--win-line);
-    font-weight: 600;
-    font-size: 15px;
-  }
-  .wifi-head .tog {
-    width: 40px;
-    height: 22px;
-    border-radius: 11px;
-    background: var(--win-accent);
-    position: relative;
-  }
-  .wifi-head .tog::after {
-    content: "";
-    position: absolute;
-    width: 16px;
-    height: 16px;
-    background: #fff;
-    border-radius: 50%;
-    top: 3px;
-    right: 3px;
-  }
-  .wifi-scroll {
-    flex: 1;
-    overflow: auto;
-    max-height: 520px;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--win-line);
-    cursor: pointer;
-    text-align: left;
-    width: 100%;
-    border-left: 0;
-    border-right: 0;
-    border-top: 0;
-    background: transparent;
-    font: inherit;
-    color: inherit;
-  }
-  .row:hover { background: var(--win-hover); }
-  .row.on { background: #e5f1fb; }
-  .row.connected-row { cursor: default; }
-  .row.connected-row:hover { background: transparent; }
-  .sig { width: 22px; flex-shrink: 0; display: flex; align-items: flex-end; gap: 2px; height: 16px; }
-  .sig i {
-    display: block;
-    width: 3px;
-    background: var(--win-ink);
-    border-radius: 1px;
-  }
-  .sig.b1 i:nth-child(1) { height: 5px; opacity: .35; }
-  .sig.b1 i:nth-child(n+2) { height: 5px; opacity: .15; }
-  .sig.b2 i:nth-child(-n+2) { height: 8px; }
-  .sig.b2 i:nth-child(n+3) { height: 5px; opacity: .2; }
-  .sig.b3 i:nth-child(-n+3) { height: 11px; }
-  .sig.b3 i:last-child { height: 5px; opacity: .25; }
-  .sig.b4 i { height: 14px; }
-  .sig i:nth-child(1) { height: 5px; }
-  .sig i:nth-child(2) { height: 8px; }
-  .sig i:nth-child(3) { height: 11px; }
-  .sig i:nth-child(4) { height: 14px; }
-  .lock {
-    width: 14px;
-    height: 14px;
-    flex-shrink: 0;
-    opacity: .65;
-    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%231a1a1a'%3E%3Cpath d='M17 8h-1V6a4 4 0 00-8 0v2H7a2 2 0 00-2 2v8a2 2 0 002 2h10a2 2 0 002-2v-8a2 2 0 00-2-2zm-3 0H10V6a2 2 0 114 0v2z'/%3E%3C/svg%3E") center/contain no-repeat;
-  }
-  .row-text { flex: 1; min-width: 0; }
-  .row-text strong {
-    display: block;
-    font-size: 14px;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .row-text span { font-size: 12px; color: var(--win-muted); }
-  .btn-link {
-    background: none;
-    border: 0;
-    color: var(--win-accent);
-    font: inherit;
-    font-size: 13px;
-    cursor: pointer;
-    padding: 4px 8px;
-  }
-  .btn-link:hover { text-decoration: underline; }
-  .join {
-    display: none;
-    padding: 14px 16px 16px;
-    border-top: 1px solid var(--win-line);
-    background: #fafafa;
-  }
-  .join.show { display: block; }
-  .row.pending-row { background: #e8f4fc; cursor: default; }
-  .row.pending-row .row-text span { color: #0067c0; }
-  .join label { display: block; font-size: 12px; color: var(--win-muted); margin-bottom: 6px; }
-  .join input {
-    width: 100%;
-    padding: 10px 12px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font: inherit;
-    margin-bottom: 10px;
-  }
-  .join button {
-    width: 100%;
-    padding: 10px;
-    border: 0;
-    border-radius: 4px;
-    background: var(--win-accent);
-    color: #fff;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .wifi-foot {
-    padding: 10px 16px;
-    border-top: 1px solid var(--win-line);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 12px;
-    color: var(--win-muted);
-  }
-  .wifi-foot button {
-    background: none;
-    border: 0;
-    color: var(--win-accent);
-    cursor: pointer;
-    font: inherit;
-  }
-  .empty {
-    padding: 20px 16px;
-    font-size: 13px;
-    color: var(--win-muted);
-    line-height: 1.5;
-  }
-  .toast {
-    min-height: 18px;
-    font-size: 12px;
-    color: var(--win-accent);
-    padding: 0 16px 8px;
-  }
-  .stale { color: #a16207; font-size: 11px; padding: 0 16px 8px; }
-</style>
-</head>
-<body>
-<div class="top">
+<div class="page-top">
   <div>
-    <h1>বোর্ড Wi-Fi</h1>
-    <p><strong>ফোন/PC Wi-Fi list-এর মতো</strong>, কিন্তু তালিকা = <strong>ওই বোর্ডের কাছে</strong> যে নেট আছে (ল্যাপটপের list নয়)।</p>
-    <p style="font-size:13px;color:var(--muted);max-width:640px;line-height:1.55;margin-top:8px">
-      উদাহরণ: এক বোর্ড <strong>বাড়িতে</strong>, এক বোর্ড <strong>ঢাকায়</strong> — AP প্যানেলে বাড়ির আশেপাশের নাম, STA প্যানেলে ঢাকার আশেপাশের নাম।
-      নামে ক্লিক → পাস → Connect = শুধু <strong>সেই বোর্ডে</strong> Wi-Fi সেট হবে।
-    </p>
-    <p style="font-size:12px;color:#a16207;max-width:640px;line-height:1.5;margin-top:8px">
-      তালিকায় শুধু <strong>বোর্ড scan</strong> — আগে থেকে কোনো নাম লাগে না (ফোনের মতো)। বোর্ড একবার অ্যাডমিন সার্ভারে পৌঁছালেই তালিকা আসে; না হলে «নাম লিখে সংযোগ» (SSID+pass) → online হলে apply।
-    </p>
-    <p style="margin-top:8px;font-size:12px;color:#9db5a6">লোকাল API: <?php echo htmlspecialchars($boardApi, ENT_QUOTES, 'UTF-8'); ?></p>
+    <h1 class="page-title">বোর্ড Wi‑Fi</h1>
+    <p class="page-lead">প্রতিটি বোর্ডের কাছে যে নেটওয়ার্ক আছে — সেটাই তালিকায়। ল্যাপটপ/ফোনের Wi‑Fi list নয়।</p>
   </div>
-  <div><?php echo $who; ?> · <a href="index.php">ড্যাশবোর্ড</a></div>
+</div>
+<div class="info-stack">
+  <p class="note">নেটওয়ার্ক বেছে নিন → পাসওয়ার্ড → Connect। শুধু সেই বোর্ডে Wi‑Fi সেট হবে (AP ও STA আলাদা)।</p>
+  <p class="note warn">তালিকা বোর্ড স্ক্যান থেকে আসে। সার্ভারে রিপোর্ট না এলে «নাম লিখে সংযোগ» দিয়ে SSID+পাস সেভ করুন — online হলে apply।</p>
+  <p class="note">API: <code><?php echo htmlspecialchars($boardApi, ENT_QUOTES, 'UTF-8'); ?></code></p>
 </div>
 <div class="boards" id="boards"></div>
 <script>
@@ -272,12 +50,49 @@ function fmtAgo(ts) {
   return Math.floor(sec / 3600) + ' ঘণ্টা আগে';
 }
 
+function boardLiveRow(row, serverNow, winSec, graceSec) {
+  const w = winSec || 50;
+  const g = graceSec || 120;
+  const now = serverNow || Math.floor(Date.now() / 1000);
+  const seen = Number(row.seen_at || row.live_at) || 0;
+  const ago = seen > 0 ? Math.max(0, now - seen) : null;
+  const online = seen > 0 && ago != null && ago <= g;
+  const fresh = seen > 0 && ago != null && ago <= w;
+  return { online, fresh, weak: online && !fresh, wifi_ok: fresh && !!row.connected, ago_sec: ago };
+}
+
+function boardStatusLine(row, meta) {
+  const live = boardLiveRow(row, meta && meta.now, meta && meta.live_window, meta && meta.live_grace);
+  const on = live.online;
+  const wifi = live.wifi_ok;
+  const power = document.createElement('span');
+  power.className = on ? 'on' : 'off';
+  power.innerHTML = '<i class="dot"></i>' + (on ? (live.weak ? 'চালু · রিপোর্ট দেরি' : 'বোর্ড চালু') : 'ড্যাশবোর্ডে খবর নেই (≥২ মিনিট)');
+  const net = document.createElement('span');
+  if (!on) {
+    net.textContent = 'নেট: —';
+    net.className = 'wifi-bad';
+  } else if (wifi) {
+    net.className = 'wifi-ok';
+    net.textContent = 'নেট যুক্ত · ' + (row.live_ssid || '') + (row.ip ? ' · ' + row.ip : '');
+  } else {
+    net.className = 'wifi-bad';
+    net.textContent = 'চালু, কিন্তু Wi-Fi সংযুক্ত নয়';
+  }
+  const bar = document.createElement('div');
+  bar.className = 'board-status';
+  bar.appendChild(power);
+  bar.appendChild(net);
+  return bar;
+}
+
 function buildPane(id, row) {
   const wrap = document.createElement('div');
   const title = document.createElement('p');
   title.className = 'board-title';
   title.textContent = labels[id] || id;
   wrap.appendChild(title);
+  wrap.appendChild(boardStatusLine(row, window.__boardMeta || null));
 
   const win = document.createElement('div');
   win.className = 'wifi-win';
@@ -291,7 +106,7 @@ function buildPane(id, row) {
   const scroll = document.createElement('div');
   scroll.className = 'wifi-scroll';
 
-  if (row.connected && row.live_ssid) {
+  if (row.wifi_ok && row.live_ssid) {
     const cr = document.createElement('div');
     cr.className = 'row connected-row';
     cr.innerHTML = sigHtml(row.rssi) + `<div class="row-text"><strong></strong><span>Connected, secured · ${row.ip || ''}</span></div>`;
@@ -306,9 +121,9 @@ function buildPane(id, row) {
   }
 
   const seen = new Set();
-  if (row.connected && row.live_ssid) seen.add(row.live_ssid);
+  if (row.wifi_ok && row.live_ssid) seen.add(row.live_ssid);
 
-  if (row.pick_ssid && !(row.connected && row.live_ssid === row.pick_ssid)) {
+  if (row.pick_ssid && !(row.wifi_ok && row.live_ssid === row.pick_ssid)) {
     seen.add(row.pick_ssid);
     const pr = document.createElement('div');
     pr.className = 'row pending-row';
@@ -438,7 +253,7 @@ async function api(board, body, toast, ssidLabel) {
     }
     refreshPauseUntil = Date.now() + 5000;
     if (data.boards) {
-      paintBoards(data.boards);
+      paintBoards(data.boards, data);
     } else {
       await refresh(true);
     }
@@ -456,14 +271,16 @@ function userIsTypingWifi() {
   return el.closest('.join') && (el.classList.contains('pass') || el.classList.contains('ssid'));
 }
 
-function paintBoards(boards) {
+function paintBoards(boards, meta) {
   if (userIsTypingWifi() || Date.now() < refreshPauseUntil) {
     return;
   }
+  window.__boardMeta = meta || window.__boardMeta || null;
   const root = document.getElementById('boards');
   root.innerHTML = '';
   for (const [id, row] of Object.entries(boards)) {
-    root.appendChild(buildPane(id, row));
+    const live = boardLiveRow(row, meta && meta.now, meta && meta.live_window, meta && meta.live_grace);
+    root.appendChild(buildPane(id, { ...row, ...live }));
   }
 }
 
@@ -478,7 +295,7 @@ async function refresh(force) {
   }
   const data = await res.json();
   if (!data.ok) return;
-  paintBoards(data.boards);
+  paintBoards(data.boards, data);
 }
 
 document.addEventListener('focusin', (e) => {
@@ -496,5 +313,4 @@ document.addEventListener('focusout', (e) => {
 refresh(true);
 setInterval(() => refresh(false), 12000);
 </script>
-</body>
-</html>
+<?php talk_dash_main_close(); talk_dash_end(); ?>

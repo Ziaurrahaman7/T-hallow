@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/lib/store.php';
+require_once __DIR__ . '/lib/dashboard_layout.php';
 header('Cache-Control: no-store');
 talk_session_start();
 
@@ -28,106 +29,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user'], $_POST['pass'
 
 if (!talk_logged_in()) {
     $bad = $loginError !== '';
-    ?>
-<!DOCTYPE html>
-<html lang="bn">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ঢুকুন · হ্যালো</title>
-<style>
-  :root {
-    --bg: #07140f;
-    --ink: #e8f2e6;
-    --muted: #9db5a6;
-    --line: rgba(212, 177, 90, 0.35);
-    --gold: #d4b15a;
-    --danger: #e07a62;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body {
-    min-height: 100%;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    color: var(--ink);
-    font-family: "Nirmala UI", "Segoe UI", sans-serif;
-    background:
-      radial-gradient(680px 360px at 50% -8%, rgba(212, 177, 90, 0.18), transparent 62%),
-      radial-gradient(520px 320px at 100% 100%, rgba(31, 122, 69, 0.2), transparent 55%),
-      var(--bg);
-  }
-  .card {
-    width: min(420px, 100%);
-    padding: 36px 32px 28px;
-    border-radius: 28px;
-    border: 1px solid var(--line);
-    background: linear-gradient(180deg, rgba(20, 48, 34, 0.96), rgba(8, 24, 16, 0.98));
-    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
-  }
-  .mark {
-    width: 18px;
-    height: 18px;
-    margin-bottom: 18px;
-    background: var(--gold);
-    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-    box-shadow: 0 0 24px rgba(212, 177, 90, 0.4);
-  }
-  h1 { margin: 0; font-size: 32px; font-weight: 700; }
-  .sub { margin: 8px 0 26px; color: var(--muted); font-size: 15px; line-height: 1.5; }
-  label { display: block; margin-bottom: 14px; color: var(--muted); font-size: 13px; }
-  input {
-    display: block;
-    width: 100%;
-    margin-top: 6px;
-    font: inherit;
-    color: var(--ink);
-    background: #0c1c14;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 12px 14px;
-    outline: none;
-  }
-  input:focus { border-color: rgba(212, 177, 90, 0.75); }
-  button {
-    width: 100%;
-    margin-top: 6px;
-    font: inherit;
-    font-weight: 700;
-    color: #142216;
-    background: linear-gradient(180deg, #e6c97a, #c6a15b);
-    border: 0;
-    border-radius: 14px;
-    padding: 12px 14px;
-    cursor: pointer;
-  }
-  button:hover { filter: brightness(1.05); }
-  .err {
-    min-height: 22px;
-    margin: 12px 0 0;
-    color: var(--danger);
-    font-size: 13px;
-  }
-</style>
-</head>
-<body>
-  <form class="card" method="post" action="index.php" autocomplete="on">
-    <div class="mark"></div>
-    <h1>হ্যালো</h1>
-    <p class="sub">কথোপকথন দেখতে নাম আর পাসওয়ার্ড দিয়ে ঢুকুন।</p>
-    <label>নাম
-      <input name="user" maxlength="40" required autocomplete="username" value="<?php echo $bad ? htmlspecialchars(trim((string) ($_POST['user'] ?? '')), ENT_QUOTES, 'UTF-8') : ''; ?>">
-    </label>
-    <label>পাসওয়ার্ড
-      <input name="pass" type="password" maxlength="80" required autocomplete="current-password">
-    </label>
-    <button type="submit">সাইন ইন</button>
-    <p class="err"><?php echo htmlspecialchars($loginError, ENT_QUOTES, 'UTF-8'); ?></p>
-  </form>
-</body>
-</html>
-    <?php
+    talk_dash_login_render(
+        $loginError,
+        $bad,
+        $bad ? trim((string) ($_POST['user'] ?? '')) : ''
+    );
     exit;
 }
 
@@ -135,475 +41,158 @@ $cfg = talk_config();
 $uploadUrls = talk_upload_urls();
 $upload = $uploadUrls[0] ?? $cfg['upload_url'];
 $upload2 = $uploadUrls[1] ?? '';
-$who = htmlspecialchars((string) $_SESSION['talk_user'], ENT_QUOTES, 'UTF-8');
+talk_dash_head('কথোপকথন', ['talk-index.css']);
+talk_dash_sidebar('talk', (string) $_SESSION['talk_user']);
+talk_dash_main_open('talk-main');
 ?>
-<!DOCTYPE html>
-<html lang="bn">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>হ্যালো কথোপকথন</title>
-<style>
-  :root {
-    --bg: #07140f;
-    --ink: #e8f2e6;
-    --muted: #9db5a6;
-    --line: rgba(212, 177, 90, 0.28);
-    --gold: #d4b15a;
-    --army: #1f7a45;
-    --ap: #e6c97a;
-    --ap-bg: #1a3324;
-    --sta: #8fbf9a;
-    --sta-bg: #123528;
-    --danger: #e07a62;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body {
-    color: var(--ink);
-    font-family: "Nirmala UI", "Segoe UI", sans-serif;
-    background: var(--bg);
-  }
-  .dash {
-    height: 100%;
-    display: flex;
-    min-height: 0;
-  }
-  .nav {
-    width: 248px;
-    flex: none;
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    padding: 22px 16px 16px;
-    background: linear-gradient(180deg, #123524 0%, #0c2418 100%);
-    border-right: 1px solid var(--line);
-  }
-  .brand { display: flex; gap: 12px; align-items: center; padding: 0 8px 8px; }
-  .brand strong { display: block; font-size: 20px; }
-  .brand span { color: var(--gold); font-size: 13px; }
-  .mark {
-    width: 16px;
-    height: 16px;
-    flex: none;
-    background: linear-gradient(135deg, #e6c97a, var(--gold));
-    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-  }
-  .nav nav { display: flex; flex-direction: column; gap: 6px; }
-  button.menu {
-    width: 100%;
-    text-align: left;
-    color: var(--muted);
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 12px;
-    padding: 12px 14px;
-    font-weight: 650;
-  }
-  button.menu:hover { color: var(--ink); background: rgba(212, 177, 90, 0.08); }
-  button.menu.on {
-    color: #142216;
-    background: linear-gradient(180deg, #e6c97a, #c6a15b);
-    border-color: transparent;
-  }
-  .navfoot {
-    margin-top: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-top: 12px;
-    border-top: 1px solid var(--line);
-  }
-  .user, .out {
-    border-radius: 12px;
-    padding: 8px 12px;
-    font-size: 13px;
-  }
-  .user { color: var(--ink); background: rgba(0, 0, 0, 0.2); }
-  .out {
-    color: var(--gold);
-    text-decoration: none;
-    text-align: center;
-    border: 1px solid var(--line);
-  }
-  .out:hover { color: var(--ink); }
-  .work {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    background:
-      radial-gradient(700px 280px at 100% -10%, rgba(212, 177, 90, 0.12), transparent 55%),
-      #0a1912;
-  }
-  .top {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    align-items: flex-start;
-    padding: 22px 28px 14px;
-  }
-  h1 { margin: 0; font-size: 28px; font-weight: 700; }
-  .sub { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
-  .topmeta { display: flex; align-items: center; gap: 10px; }
-  .live {
-    border-radius: 999px;
-    padding: 5px 10px;
-    font-size: 12px;
-    color: #d7ecc0;
-    background: #163528;
-    border: 1px solid rgba(143, 191, 154, 0.35);
-  }
-  .live::before {
-    content: "";
-    display: inline-block;
-    width: 7px;
-    height: 7px;
-    margin-right: 6px;
-    border-radius: 50%;
-    background: var(--army);
-    box-shadow: 0 0 0 0 rgba(31, 122, 69, 0.7);
-    animation: pulse 1.8s ease-out infinite;
-  }
-  @keyframes pulse {
-    70% { box-shadow: 0 0 0 6px rgba(31, 122, 69, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(31, 122, 69, 0); }
-  }
-  .stats { display: flex; gap: 8px; }
-  .stats div {
-    min-width: 84px;
-    padding: 8px 12px;
-    border-radius: 14px;
-    background: #123024;
-    border: 1px solid var(--line);
-    color: var(--muted);
-    font-size: 12px;
-  }
-  .stats b { display: block; margin-top: 2px; color: var(--ink); font-size: 16px; font-weight: 700; }
-  .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .view[hidden] { display: none !important; }
-  button {
-    font: inherit;
-    color: var(--ink);
-    background: #163528;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: 8px 14px;
-    cursor: pointer;
-  }
-  button:hover { border-color: var(--gold); }
-  button:disabled { opacity: 0.45; cursor: default; }
-  button.danger { color: #ffd7cf; background: #4a2a24; border-color: #7a463c; }
-  .sheet {
-    width: min(560px, calc(100% - 48px));
-    margin: 12px auto 28px;
-    padding: 22px;
-    border-radius: 20px;
-    border: 1px solid var(--line);
-    background: #10281d;
-  }
-  .sheet h2 { margin: 0 0 8px; font-size: 20px; }
-  .sheet p { margin: 0 0 16px; color: var(--muted); line-height: 1.55; }
-  .wifi { display: flex; flex-direction: column; gap: 12px; }
-  .wifi label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; }
-  .wifi input {
-    font: inherit;
-    color: var(--ink);
-    background: #0c1c14;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 12px 14px;
-    outline: none;
-  }
-  .wifi input:focus { border-color: var(--gold); }
-  .wifi button {
-    align-self: flex-start;
-    color: #142216;
-    background: linear-gradient(180deg, #e6c97a, #c6a15b);
-    border: 0;
-    font-weight: 700;
-    margin-top: 4px;
-  }
-  #wifiMsg { color: var(--sta); font-size: 14px; min-height: 20px; }
-  .wifilist { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
-  .wifi textarea {
-    font: inherit;
-    padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid var(--line);
-    background: var(--panel);
-    color: var(--ink);
-    resize: vertical;
-  }
-  .url-chip { display: inline-block; margin: 2px 4px 2px 0; font-size: 11px; word-break: break-all; }
-  .fwrow { display: flex; flex-wrap: wrap; gap: 8px; }
-  #fwApMsg, #fwStaMsg { color: var(--sta); font-size: 14px; min-height: 20px; }
-  .talkbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    padding: 0 28px 10px;
-  }
-  .talkbar .hint { color: var(--muted); font-size: 12px; }
-  main {
-    flex: 1;
-    overflow: auto;
-    display: flex;
-    flex-direction: column;
-    padding: 8px 28px 28px;
-  }
-  .log {
-    max-width: 680px;
-    width: 100%;
-    margin: auto auto 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .day {
-    align-self: center;
-    color: var(--muted);
-    font-size: 12px;
-    background: #163528;
-    border-radius: 999px;
-    padding: 4px 12px;
-    margin: 16px 0 6px;
-  }
-  .row { display: flex; align-items: flex-end; gap: 8px; margin-top: 12px; }
-  .row.follow { margin-top: 4px; }
-  .row.sta { flex-direction: row-reverse; }
-  .ava {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    font-size: 11px;
-    font-weight: 700;
-    flex: none;
-  }
-  .row.follow .ava { visibility: hidden; }
-  .row.ap .ava { background: #2a4030; color: var(--ap); }
-  .row.sta .ava { background: #1a4a34; color: var(--sta); }
-  .bubble {
-    width: min(360px, 78%);
-    border: 1px solid var(--line);
-    border-radius: 18px 18px 18px 6px;
-    padding: 8px 10px 6px;
-    background: #10281d;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  }
-  .row.sta .bubble { border-radius: 18px 18px 6px 18px; }
-  .row.ap .bubble { background: var(--ap-bg); border-color: #6d5a2e; }
-  .row.sta .bubble { background: var(--sta-bg); border-color: #2f6b45; }
-  .name { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
-  .row.ap .name { color: var(--ap); }
-  .row.sta .name { color: var(--sta); }
-  .row.follow .name { display: none; }
-  .note { display: flex; align-items: center; gap: 8px; }
-  .play {
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    border-radius: 50%;
-    background: #0c1c14;
-    flex: none;
-  }
-  .track { flex: 1; min-width: 0; }
-  .bars { display: flex; align-items: center; gap: 2px; height: 28px; }
-  .bars i {
-    width: 3px;
-    border-radius: 2px;
-    background: currentColor;
-    opacity: 0.45;
-    display: block;
-    transform-origin: center;
-  }
-  .row.ap .bars { color: var(--ap); }
-  .row.sta .bars { color: var(--sta); }
-  .note.on .bars i { opacity: 1; animation: eq 0.7s ease-in-out infinite alternate; }
-  .note.on .bars i:nth-child(odd) { animation-duration: 0.5s; }
-  @keyframes eq {
-    from { transform: scaleY(0.4); }
-    to { transform: scaleY(1); }
-  }
-  .len { font-size: 12px; color: var(--muted); min-width: 34px; text-align: right; }
-  .meta {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 8px;
-    margin-top: 2px;
-  }
-  .when { font-size: 11px; color: var(--muted); }
-  audio { display: none; }
-  .fresh { animation: rise 0.45s ease; }
-  @keyframes rise {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: none; }
-  }
-  .empty {
-    max-width: 460px;
-    margin: 10vh auto 0;
-    text-align: center;
-    color: var(--muted);
-  }
-  .empty h2 { color: var(--ink); font-size: 22px; margin: 0 0 8px; }
-  .pair { display: flex; justify-content: center; gap: 14px; margin-bottom: 18px; }
-  .chip {
-    min-width: 92px;
-    padding: 10px 14px;
-    border-radius: 999px;
-    border: 1px solid var(--line);
-    font-weight: 700;
-  }
-  .chip.ap { color: var(--ap); background: var(--ap-bg); }
-  .chip.sta { color: var(--sta); background: var(--sta-bg); }
-  .pick { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-  .drop { padding: 4px 10px; font-size: 12px; }
-  footer {
-    padding: 12px 24px 16px;
-    color: var(--muted);
-    font-size: 13px;
-    line-height: 1.55;
-    border-top: 1px solid var(--line);
-  }
-  code {
-    color: var(--ink);
-    background: #163528;
-    padding: 1px 6px;
-    border-radius: 6px;
-  }
-  .err { color: var(--danger); }
-  @media (max-width: 760px) {
-    .dash { flex-direction: column; }
-    .nav {
-      width: 100%;
-      flex-direction: row;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      border-right: 0;
-      border-bottom: 1px solid var(--line);
-    }
-    .brand span, .navfoot .user { display: none; }
-    .navfoot { margin: 0; padding: 0; border: 0; }
-    .brand { padding: 0; }
-    .nav nav { flex-direction: row; flex: 1; overflow: auto; }
-    button.menu { width: auto; white-space: nowrap; padding: 8px 12px; }
-    .top { flex-direction: column; padding: 16px; }
-    h1 { font-size: 24px; }
-    .sheet { width: auto; margin: 8px 12px 20px; }
-    .talkbar { padding: 0 12px 10px; }
-    main { padding: 8px 12px 20px; }
-  }
-</style>
-</head>
-<body>
-<div class="dash">
-<aside class="nav">
-  <div class="brand">
-    <div class="mark"></div>
-    <div>
-      <strong>হ্যালো</strong>
-      <span>ড্যাশবোর্ড</span>
+<header class="dash-header card" id="dashHeader">
+    <div class="dash-header-main">
+      <span class="dash-header-icon" id="headerIcon"><?php echo talk_dash_icon('chat'); ?></span>
+      <div class="dash-header-text">
+        <h1 class="page-title" id="pageTitle">কথোপকথন</h1>
+        <p class="page-lead" id="pageSub">গ্রুপ চ্যাট — বোর্ড Wi‑Fi পেলে কথা এখানে দেখা যায়।</p>
+      </div>
     </div>
-  </div>
-  <nav>
-    <button type="button" class="menu on" data-panel="talk">কথোপকথন</button>
-    <button type="button" class="menu" onclick="location.href='net.php'">বোর্ড Wi-Fi</button>
-    <button type="button" class="menu" data-panel="wifi">সার্ভার ঠিকানা</button>
-    <button type="button" class="menu" data-panel="fw">বোর্ড আপডেট</button>
-  </nav>
-  <div class="navfoot">
-    <span class="user"><?php echo $who; ?></span>
-    <a class="out" href="index.php?out=1">বের হন</a>
-  </div>
-</aside>
-<section class="work">
-  <header class="top">
-    <div>
-      <h1 id="pageTitle">কথোপকথন</h1>
-      <p class="sub" id="pageSub">গ্রুপ চ্যাট। যে যখন ভয়েস দেয়, সেই সময়ে এখানে আসে।</p>
-    </div>
-    <div class="topmeta">
-      <span class="live">লাইভ</span>
-      <span id="status"></span>
-      <div class="stats">
-        <div>কথা<b id="count">০</b></div>
-        <div>শেষ দেখা<b id="seen">—</b></div>
+    <div class="dash-header-meta is-talk-only">
+      <span class="stat-pill live" id="headerLivePill">
+        <span class="stat-ico"><?php echo talk_dash_icon('live'); ?></span>
+        <span class="stat-label">লাইভ</span>
+      </span>
+      <span id="status" class="header-status"></span>
+      <div class="stat-pill" title="মোট কথা">
+        <span class="stat-ico"><?php echo talk_dash_icon('messages'); ?></span>
+        <span class="stat-label">কথা <b id="count">০</b></span>
+      </div>
+      <div class="stat-pill" title="শেষ কথার সময়">
+        <span class="stat-ico"><?php echo talk_dash_icon('clock'); ?></span>
+        <span class="stat-label">শেষ <b id="seen">—</b></span>
       </div>
     </div>
   </header>
   <div class="view" id="panelTalk">
-    <div class="talkbar">
-      <button type="button" id="clearPick" disabled>নির্বাচিত মুছুন</button>
-      <button type="button" id="clearAll" class="danger">সব মুছুন</button>
+    <div class="talk-toolbar">
+      <button type="button" id="clearPick" class="btn-icon" disabled aria-label="নির্বাচিত সরান" title="নির্বাচিত সরান">
+        <span class="ico"><?php echo talk_dash_icon('trash'); ?></span>
+        <span class="btn-badge" id="clearPickBadge" hidden aria-hidden="true"></span>
+      </button>
+      <button type="button" id="clearAll" class="btn-icon danger" aria-label="সব সরান" title="সব সরান">
+        <span class="ico"><?php echo talk_dash_icon('trash'); ?></span>
+      </button>
       <span class="hint">পাঠানোর ঠিকানা:
         <?php foreach ($uploadUrls as $u): ?>
           <code class="url-chip"><?php echo htmlspecialchars($u, ENT_QUOTES, 'UTF-8'); ?></code>
         <?php endforeach; ?>
       </span>
     </div>
-    <main id="main">
+    <div class="talk-scroll wa-chat" id="main">
       <div class="empty" id="empty">
         <div class="pair"><span class="chip ap">AP</span><span class="chip sta">STA</span></div>
         <h2>এখনো কোনো কথা আসেনি</h2>
-        <p>দুই বোর্ডে কথা বলার পর সেগুলো Wi-Fi পেলে এই পাতায় চলে আসবে। AP বাঁ দিকে, STA ডান দিকে।</p>
+        <p>দুই বোর্ডে কথা বলার পর Wi‑Fi পেলে এখানে দেখা যাবে। AP বাঁ দিকে, STA ডান দিকে।</p>
       </div>
       <div class="log" id="log" hidden></div>
-    </main>
+    </div>
+  </div>
+  <div class="view" id="panelRange" hidden>
+    <div class="range-actions">
+      <button type="button" class="btn-primary-solid" id="rangeGeoBtn">আমার অবস্থান ব্যবহার করুন</button>
+      <button type="button" class="btn-secondary" id="rangeSiteBothBtn">এই অবস্থান = দুই বোর্ড</button>
+    </div>
+    <p id="rangeMsg"></p>
+    <div class="range-grid">
+      <div class="card range-card link">
+        <h3>AP ↔ STA (HaLow)</h3>
+        <div class="big" id="rangeLinkM">—</div>
+        <div class="meta" id="rangeLinkMeta">HaLow RSSI — আনুমানিক। Wi‑Fi রিপোর্ট থাকলে আপডেট হয়।</div>
+      </div>
+      <div class="card range-card ap">
+        <h3>আপনি → AP</h3>
+        <div class="big" id="rangeApM">—</div>
+        <div class="meta" id="rangeApMeta"></div>
+      </div>
+      <div class="card range-card sta">
+        <h3>আপনি → STA</h3>
+        <div class="big" id="rangeStaM">—</div>
+        <div class="meta" id="rangeStaMeta"></div>
+      </div>
+    </div>
+    <form id="rangeSiteForm" class="card sheet">
+      <h2>বোর্ডের জিও অবস্থান</h2>
+      <p class="lead">GPS নেই — Maps থেকে lat/lon দিন। আপনার অবস্থানের সাথে মিলিয়ে দূরত্ব দেখায়।</p>
+      <div class="range-form">
+        <label>AP · lat
+          <input id="siteApLat" type="text" inputmode="decimal" placeholder="23.8103">
+        </label>
+        <label>AP · lon
+          <input id="siteApLon" type="text" inputmode="decimal" placeholder="90.4125">
+        </label>
+        <label>STA · lat
+          <input id="siteStaLat" type="text" inputmode="decimal" placeholder="23.8103">
+        </label>
+        <label>STA · lon
+          <input id="siteStaLon" type="text" inputmode="decimal" placeholder="90.4125">
+        </label>
+      </div>
+      <button type="submit" class="btn-primary-solid">অবস্থান সেভ</button>
+    </form>
   </div>
   <div class="view" id="panelWifi" hidden>
-    <form id="wifiForm" class="sheet wifi">
+    <form id="wifiForm" class="card sheet">
       <h2>সার্ভার ঠিকানা</h2>
-      <p>AP/STA-র Wi-Fi বেছে নিতে <a href="net.php">বোর্ড Wi-Fi</a> পাতা খুলুন। এখানে শুধু কথা কোথায় পাঠাবে সেটা।</p>
+      <p class="lead">কথা আপলোডের URL। বোর্ড Wi‑Fi → <a href="net.php">বোর্ড Wi‑Fi</a>।</p>
       <label>ড্যাশবোর্ড ১ (কথা পাঠানোর ঠিকানা)
         <input id="uploadUrl" type="url" maxlength="220" required value="<?php echo htmlspecialchars($upload, ENT_QUOTES, 'UTF-8'); ?>">
       </label>
-      <label>ড্যাশবোর্ড ২ (ঐচ্ছিক — লোকাল + সার্ভার দুটো)
+      <label>ড্যাশবোর্ড ২ (ঐচ্ছিক)
         <input id="uploadUrl2" type="url" maxlength="220" placeholder="https://hallow.mmgbd.com/api/upload.php" value="<?php echo htmlspecialchars($upload2, ENT_QUOTES, 'UTF-8'); ?>">
       </label>
-      <button type="submit">ঠিকানা সেভ</button>
+      <button type="submit" class="btn-primary-solid">ঠিকানা সেভ</button>
       <span id="wifiMsg"></span>
     </form>
   </div>
   <div class="view" id="panelFw" hidden>
-    <p class="talkbar hint">প্রথমবার USB দিয়ে দিতে হবে, পার্টিশন Minimal SPIFFS (1.9MB APP with OTA)। তারপর এখান থেকে। সংস্করণ আগের চেয়ে বড় রাখুন।</p>
-    <form id="fwAp" class="sheet wifi">
+    <p class="note">প্রথম OTA: USB + Minimal SPIFFS (1.9MB APP with OTA)। পরে সংস্করণ নম্বর বাড়িয়ে আপলোড করুন।</p>
+    <form id="fwAp" class="card sheet">
       <h2>AP আপডেট</h2>
       <p id="fwApStat">এখনো কোনো ফাইল নেই।</p>
       <label>সংস্করণ
         <input id="fwApVer" type="number" min="1" max="9999" required>
       </label>
-      <label>Arduino থেকে Export compiled Binary করা .bin
+      <label>.bin ফাইল
         <input id="fwApFile" type="file" accept=".bin,application/octet-stream" required>
       </label>
       <div class="fwrow">
-        <button type="submit">ফাইল রাখুন</button>
-        <button type="button" id="fwApPush">বোর্ডে পাঠান</button>
+        <button type="submit" class="btn-primary-solid">ফাইল রাখুন</button>
+        <button type="button" class="btn-secondary" id="fwApPush">বোর্ডে পাঠান</button>
       </div>
       <span id="fwApMsg"></span>
     </form>
-    <form id="fwSta" class="sheet wifi">
+    <form id="fwSta" class="card sheet">
       <h2>STA আপডেট</h2>
       <p id="fwStaStat">এখনো কোনো ফাইল নেই।</p>
       <label>সংস্করণ
         <input id="fwStaVer" type="number" min="1" max="9999" required>
       </label>
-      <label>Arduino থেকে Export compiled Binary করা .bin
+      <label>.bin ফাইল
         <input id="fwStaFile" type="file" accept=".bin,application/octet-stream" required>
       </label>
       <div class="fwrow">
-        <button type="submit">ফাইল রাখুন</button>
-        <button type="button" id="fwStaPush">বোর্ডে পাঠান</button>
+        <button type="submit" class="btn-primary-solid">ফাইল রাখুন</button>
+        <button type="button" class="btn-secondary" id="fwStaPush">বোর্ডে পাঠান</button>
       </div>
       <span id="fwStaMsg"></span>
     </form>
   </div>
-</section>
-</div>
 <script>
+const ICON_TRASH = <?php echo json_encode(talk_dash_icon('trash'), JSON_UNESCAPED_UNICODE); ?>;
+const ICON_PLAY = <?php echo json_encode(talk_dash_icon('play'), JSON_UNESCAPED_UNICODE); ?>;
+const ICON_PAUSE = <?php echo json_encode(talk_dash_icon('pause'), JSON_UNESCAPED_UNICODE); ?>;
+const HEADER_ICONS = <?php echo json_encode([
+  'talk' => talk_dash_icon('chat'),
+  'range' => talk_dash_icon('range'),
+  'wifi' => talk_dash_icon('server'),
+  'fw' => talk_dash_icon('chip'),
+], JSON_UNESCAPED_UNICODE); ?>;
 const logEl = document.getElementById('log');
 const emptyEl = document.getElementById('empty');
 const countEl = document.getElementById('count');
@@ -699,25 +288,30 @@ function render(items) {
       html += '<div class="day">' + day + '</div>';
     }
     const side = it.board === 'STA' ? 'sta' : 'ap';
-    const follow = prev === it.board ? ' follow' : '';
+    const isFollow = prev === it.board;
+    const follow = isFollow ? ' follow' : '';
     prev = it.board;
     const fresh = known.size && !known.has(it.id) ? ' fresh' : '';
     const id = encodeURIComponent(it.id);
     const on = picked.has(it.id) ? ' checked' : '';
+    const pickedCls = picked.has(it.id) ? ' is-picked' : '';
     html += '<div class="row ' + side + follow + '">';
-    html += '<div class="ava">' + it.board + '</div>';
-    html += '<div class="bubble' + fresh + '">';
-    html += '<div class="name">' + it.board + '</div>';
-    html += '<div class="note">';
-    html += '<button type="button" class="play" aria-label="চালান">▶</button>';
-    html += '<div class="track"><div class="bars">' + bars(it.id) + '</div></div>';
-    html += '<span class="len">' + clock(it.sec) + '</span>';
-    html += '<audio preload="metadata" src="api/audio.php?id=' + id + '"></audio>';
+    html += '<div class="bubble wa' + fresh + pickedCls + '">';
+    html += '<div class="wa-tools">';
+    html += '<label class="wa-check" title="নির্বাচন"><input type="checkbox" data-id="' + id + '"' + on + '></label>';
+    html += '<button type="button" class="drop wa-del" data-id="' + id + '" aria-label="সরান" title="সরান">' + ICON_TRASH + '</button>';
     html += '</div>';
-    html += '<div class="meta"><label class="pick"><input type="checkbox" data-id="' + id + '"' + on + '> বেছে নিন</label>';
-    html += '<button type="button" class="drop" data-id="' + id + '">মুছুন</button>';
-    html += '<span class="when">' + it.at + '</span></div>';
-    html += '</div></div>';
+    if (!isFollow) {
+      html += '<div class="wa-sender">' + it.board + '</div>';
+    }
+    html += '<div class="note wa-voice">';
+    html += '<button type="button" class="play wa-play" aria-label="চালান">' + ICON_PLAY + '</button>';
+    html += '<div class="wa-body">';
+    html += '<div class="track wa-track"><div class="bars wa-bars">' + bars(it.id) + '</div></div>';
+    html += '<div class="wa-meta"><span class="len wa-dur">' + clock(it.sec) + '</span><span class="when">' + it.at + '</span></div>';
+    html += '</div>';
+    html += '<audio preload="metadata" src="api/audio.php?id=' + id + '"></audio>';
+    html += '</div></div></div>';
   }
   logEl.innerHTML = html;
   bindNotes();
@@ -725,8 +319,7 @@ function render(items) {
   for (const id of [...picked]) {
     if (!next.has(id)) picked.delete(id);
   }
-  clearPickBtn.disabled = picked.size === 0;
-  clearPickBtn.textContent = picked.size ? 'নির্বাচিত মুছুন (' + banglaNum(picked.size) + ')' : 'নির্বাচিত মুছুন';
+  syncClearPick();
   pinBottom();
   const last = items[items.length - 1];
   seenEl.textContent = last ? last.at : '—';
@@ -752,9 +345,25 @@ logEl.addEventListener('change', (event) => {
   if (!box.dataset || !box.dataset.id) return;
   if (box.checked) picked.add(box.dataset.id);
   else picked.delete(box.dataset.id);
-  clearPickBtn.disabled = picked.size === 0;
-  clearPickBtn.textContent = picked.size ? 'নির্বাচিত মুছুন (' + banglaNum(picked.size) + ')' : 'নির্বাচিত মুছুন';
+  const bubble = box.closest('.bubble.wa');
+  if (bubble) bubble.classList.toggle('is-picked', box.checked);
+  syncClearPick();
 });
+
+function syncClearPick() {
+  clearPickBtn.disabled = picked.size === 0;
+  const badge = document.getElementById('clearPickBadge');
+  if (!badge) return;
+  if (picked.size > 0) {
+    badge.textContent = banglaNum(picked.size);
+    badge.hidden = false;
+    clearPickBtn.setAttribute('aria-label', 'নির্বাচিত ' + picked.size + ' টি সরান');
+  } else {
+    badge.textContent = '';
+    badge.hidden = true;
+    clearPickBtn.setAttribute('aria-label', 'নির্বাচিত সরান');
+  }
+}
 
 function bindNotes() {
   logEl.querySelectorAll('audio').forEach((audio) => {
@@ -765,15 +374,15 @@ function bindNotes() {
       if (Number.isFinite(audio.duration)) len.textContent = clock(audio.duration);
     });
     audio.addEventListener('play', () => {
-      play.textContent = '❚❚';
+      play.innerHTML = ICON_PAUSE;
       note.classList.add('on');
     });
     audio.addEventListener('pause', () => {
-      play.textContent = '▶';
+      play.innerHTML = ICON_PLAY;
       note.classList.remove('on');
     });
     audio.addEventListener('ended', () => {
-      play.textContent = '▶';
+      play.innerHTML = ICON_PLAY;
       note.classList.remove('on');
     });
   });
@@ -874,25 +483,243 @@ wifiForm.addEventListener('submit', async (event) => {
 });
 
 const panels = {
-  talk: ['কথোপকথন', 'গ্রুপ চ্যাট। যে যখন ভয়েস দেয়, সেই সময়ে এখানে আসে।'],
-  wifi: ['সার্ভার ঠিকানা', 'কথা কোন URL-এ যাবে। Wi-Fi বোর্ডের জন্য আলাদা পাতা।'],
-  fw: ['বোর্ড আপডেট', 'ফাইল রাখুন, তারপর বোর্ডে পাঠান। বোর্ড কথা থামলে নিজে নেবে।']
+  talk: ['কথোপকথন', 'লাইভ গ্রুপ চ্যাট — বোর্ড Wi‑Fi সংযুক্ত থাকলে কথা এখানে দেখা যায়।'],
+  range: ['দূরত্ব', 'HaLow লিংক ও আপনার অবস্থান থেকে AP/STA পর্যন্ত আনুমানিক দূরত্ব।'],
+  wifi: ['সার্ভার', 'কথা কোন URL-এ আপলোড হবে — Wi‑Fi বোর্ড সেটিং net.php-তে।'],
+  fw: ['ফার্মওয়্যার', 'OTA .bin আপলোড ও বোর্ডে পুশ — সংস্করণ নম্বর বাড়িয়ে রাখুন।']
 };
-document.querySelectorAll('button.menu').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const name = btn.dataset.panel;
-    document.querySelectorAll('button.menu').forEach((other) => {
-      other.classList.toggle('on', other === btn);
-    });
-    document.getElementById('panelTalk').hidden = name !== 'talk';
-    document.getElementById('panelWifi').hidden = name !== 'wifi';
-    document.getElementById('panelFw').hidden = name !== 'fw';
-    document.getElementById('pageTitle').textContent = panels[name][0];
-    document.getElementById('pageSub').textContent = panels[name][1];
-    btn.scrollIntoView({ inline: 'center', block: 'nearest' });
-    if (name === 'talk') pinBottom();
-    if (name === 'fw') loadFw();
+
+function openPanel(name, opts) {
+  const pushHash = !(opts && opts.pushHash === false);
+  if (!panels[name]) name = 'talk';
+  document.querySelectorAll('.side-link').forEach((link) => {
+    if (link.href && link.href.includes('out=1')) return;
+    const panel = link.dataset.panel;
+    const isTalk = !panel && link.getAttribute('href') && link.getAttribute('href').includes('index.php');
+    const on = panel ? panel === name : (name === 'talk' && isTalk);
+    link.classList.toggle('is-active', !!on);
   });
+  document.getElementById('panelTalk').hidden = name !== 'talk';
+  document.getElementById('panelRange').hidden = name !== 'range';
+  document.getElementById('panelWifi').hidden = name !== 'wifi';
+  document.getElementById('panelFw').hidden = name !== 'fw';
+  document.getElementById('pageTitle').textContent = panels[name][0];
+  document.getElementById('pageSub').textContent = panels[name][1];
+  const iconEl = document.getElementById('headerIcon');
+  if (iconEl && HEADER_ICONS[name]) iconEl.innerHTML = HEADER_ICONS[name];
+  const livePill = document.getElementById('headerLivePill');
+  const headerMeta = document.querySelector('.dash-header-meta');
+  if (headerMeta) headerMeta.classList.toggle('is-talk-only', name === 'talk');
+  if (pushHash && location.hash.replace('#', '') !== name && name !== 'talk') {
+    history.replaceState(null, '', '#' + name);
+  } else if (pushHash && name === 'talk' && location.hash) {
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  if (name === 'talk') pinBottom();
+  if (name === 'range') {
+    loadRange(true);
+  } else if (rangeTimer) {
+    clearInterval(rangeTimer);
+    rangeTimer = null;
+  }
+  if (name === 'fw') loadFw();
+}
+
+document.querySelectorAll('.side-link[data-panel]').forEach((link) => {
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    openPanel(link.dataset.panel);
+  });
+});
+
+(function initPanelFromHash() {
+  const h = (location.hash || '').replace('#', '');
+  if (panels[h]) openPanel(h, { pushHash: false });
+})();
+window.addEventListener('hashchange', () => {
+  const h = (location.hash || '').replace('#', '');
+  openPanel(panels[h] ? h : 'talk', { pushHash: false });
+});
+
+let rangeTimer = null;
+let rangeSiteDirty = false;
+
+function rangeSiteFormActive() {
+  const form = document.getElementById('rangeSiteForm');
+  if (!form) return false;
+  if (rangeSiteDirty) return true;
+  const ae = document.activeElement;
+  return !!(ae && form.contains(ae) && ae.tagName === 'INPUT');
+}
+
+function bindRangeSiteInputs() {
+  ['siteApLat', 'siteApLon', 'siteStaLat', 'siteStaLon'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.bound) return;
+    el.dataset.bound = '1';
+    el.addEventListener('input', () => { rangeSiteDirty = true; });
+  });
+}
+bindRangeSiteInputs();
+
+function fmtMeters(m) {
+  if (m == null || !Number.isFinite(m)) return '—';
+  if (m >= 1000) return banglaNum((m / 1000).toFixed(1)) + ' কিমি';
+  return banglaNum(Math.round(m)) + ' মি';
+}
+
+function renderRange(data, opts) {
+  const syncSites = opts && opts.syncSites === true;
+  const link = data.halow_link;
+  document.getElementById('rangeLinkM').textContent = link && link.meters != null
+    ? fmtMeters(link.meters)
+    : '—';
+  const apHr = data.boards && data.boards.AP ? data.boards.AP.halow_rssi : 0;
+  const staHr = data.boards && data.boards.STA ? data.boards.STA.halow_rssi : 0;
+  let meta = '';
+  if (link && link.meters != null) {
+    meta = 'AP দেখছে ' + apHr + ' dBm · STA দেখছে ' + staHr + ' dBm (আনুমানিক)';
+  } else {
+    meta = 'HaLow RSSI এখনো আসেনি — দুই বোর্ড চালু + Wi-Fi রিপোর্ট লাগবে।';
+  }
+  document.getElementById('rangeLinkMeta').textContent = meta;
+
+  const du = data.user_distance || {};
+  ['AP', 'STA'].forEach((id) => {
+    const row = du[id] || {};
+    const big = document.getElementById(id === 'AP' ? 'rangeApM' : 'rangeStaM');
+    const sub = document.getElementById(id === 'AP' ? 'rangeApMeta' : 'rangeStaMeta');
+    big.textContent = fmtMeters(row.meters);
+    if (!data.user) {
+      sub.textContent = 'আগে «আমার অবস্থান ব্যবহার করুন» চাপুন।';
+    } else if (!row.site_set) {
+      sub.textContent = 'নিচে AP/STA-র lat-lon সেট করুন।';
+    } else {
+      const b = data.boards[id] || {};
+      const netLine = b.wifi_ok ? ('নেট ✓ ' + (b.live_ssid || '')) : (b.online ? 'চালু, নেট নেই' : 'বন্ধ');
+      sub.textContent = (row.site_label || '') + ' · ' + netLine;
+    }
+  });
+
+  if (syncSites && !rangeSiteFormActive()) {
+    const sites = data.sites || {};
+    if (sites.site_ap) {
+      document.getElementById('siteApLat').value = sites.site_ap.lat != null ? sites.site_ap.lat : '';
+      document.getElementById('siteApLon').value = sites.site_ap.lon != null ? sites.site_ap.lon : '';
+    }
+    if (sites.site_sta) {
+      document.getElementById('siteStaLat').value = sites.site_sta.lat != null ? sites.site_sta.lat : '';
+      document.getElementById('siteStaLon').value = sites.site_sta.lon != null ? sites.site_sta.lon : '';
+    }
+    rangeSiteDirty = false;
+  }
+}
+
+async function loadRange(startPoll) {
+  try {
+    const res = await fetch('api/range.php', { cache: 'no-store' });
+    if (gone(res)) return;
+    const data = await res.json();
+    if (!data.ok) return;
+    renderRange(data, { syncSites: !!startPoll });
+    if (startPoll) {
+      if (rangeTimer) clearInterval(rangeTimer);
+      rangeTimer = setInterval(() => loadRange(false), 12000);
+    }
+  } catch (e) {}
+}
+
+document.getElementById('rangeGeoBtn').addEventListener('click', () => {
+  const msg = document.getElementById('rangeMsg');
+  msg.textContent = '';
+  msg.className = '';
+  if (!navigator.geolocation) {
+    msg.textContent = 'এই ব্রাউজারে অবস্থান সাপোর্ট নেই।';
+    msg.className = 'err';
+    return;
+  }
+  msg.textContent = 'অবস্থান খোঁজা হচ্ছে…';
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    try {
+      const res = await fetch('api/range.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'user_geo',
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          acc: pos.coords.accuracy
+        })
+      });
+      if (gone(res)) return;
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error('bad');
+      msg.textContent = 'অবস্থান সেভ হয়েছে (±' + Math.round(pos.coords.accuracy) + ' মি)।';
+      renderRange(data, { syncSites: false });
+    } catch (e) {
+      msg.textContent = 'সেভ হয়নি।';
+      msg.className = 'err';
+    }
+  }, () => {
+    msg.textContent = 'অবস্থানের অনুমতি দিন (ব্রাউজার/Windows)।';
+    msg.className = 'err';
+  }, { enableHighAccuracy: true, timeout: 15000 });
+});
+
+document.getElementById('rangeSiteBothBtn').addEventListener('click', async () => {
+  const msg = document.getElementById('rangeMsg');
+  msg.textContent = '';
+  msg.className = '';
+  try {
+    const res = await fetch('api/range.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'use_user_for_both', label: 'মাঠ' })
+    });
+    if (gone(res)) return;
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      msg.textContent = 'আগে আপনার অবস্থান সেট করুন।';
+      msg.className = 'err';
+      return;
+    }
+    msg.textContent = 'দুই বোর্ড একই বিন্দুতে সেট।';
+    renderRange(data, { syncSites: true });
+  } catch (e) {
+    msg.textContent = 'সেভ হয়নি।';
+    msg.className = 'err';
+  }
+});
+
+document.getElementById('rangeSiteForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const msg = document.getElementById('rangeMsg');
+  msg.textContent = '';
+  msg.className = '';
+  const parse = (v) => {
+    const x = parseFloat(String(v).replace(',', '.'));
+    return Number.isFinite(x) ? x : null;
+  };
+  try {
+    const res = await fetch('api/range.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'save_sites',
+        site_ap: { lat: parse(document.getElementById('siteApLat').value), lon: parse(document.getElementById('siteApLon').value) },
+        site_sta: { lat: parse(document.getElementById('siteStaLat').value), lon: parse(document.getElementById('siteStaLon').value) }
+      })
+    });
+    if (gone(res)) return;
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error('bad');
+    msg.textContent = 'বোর্ড অবস্থান সেভ হয়েছে।';
+    rangeSiteDirty = false;
+    renderRange(data, { syncSites: true });
+  } catch (e) {
+    msg.textContent = 'সেভ হয়নি — lat/lon ঠিক আছে কি দেখুন।';
+    msg.className = 'err';
+  }
 });
 
 function fwStat(row) {
@@ -966,5 +793,4 @@ bindFw('fwSta', 'STA', 'fwStaFile', 'fwStaVer', 'fwStaMsg', 'fwStaPush');
 load();
 setInterval(load, 4000);
 </script>
-</body>
-</html>
+<?php talk_dash_main_close(); talk_dash_end(); ?>

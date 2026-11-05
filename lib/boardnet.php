@@ -12,6 +12,63 @@ function talk_board_label(string $board): string
     return $board === 'STA' ? 'STA (স্পিকার)' : 'AP (মাইক)';
 }
 
+/** Fresh report (netReport ~ every 12s on firmware). */
+function talk_board_live_window(): int
+{
+    return 50;
+}
+
+/** Still treat board as up — avoid «বন্ধ» on one missed HTTP report. */
+function talk_board_live_grace(): int
+{
+    return 120;
+}
+
+function talk_board_is_online(int $seenAt, ?int $now = null): bool
+{
+    if ($seenAt <= 0) {
+        return false;
+    }
+    $now = $now ?? time();
+
+    return ($now - $seenAt) <= talk_board_live_grace();
+}
+
+function talk_board_is_fresh(int $seenAt, ?int $now = null): bool
+{
+    if ($seenAt <= 0) {
+        return false;
+    }
+    $now = $now ?? time();
+
+    return ($now - $seenAt) <= talk_board_live_window();
+}
+
+/**
+ * @param  array{connected?: bool, live_at?: int, live_ssid?: string, ip?: string, rssi?: int}  $row
+ * @return array{online: bool, wifi_ok: bool, ago_sec: ?int}
+ */
+function talk_board_live_flags(array $row, ?int $now = null): array
+{
+    $now = $now ?? time();
+    $seenAt = (int) ($row['seen_at'] ?? 0);
+    if ($seenAt <= 0) {
+        $seenAt = (int) ($row['live_at'] ?? 0);
+    }
+    $online = talk_board_is_online($seenAt, $now);
+    $fresh = talk_board_is_fresh($seenAt, $now);
+    $wifiOk = $fresh && ! empty($row['connected']);
+
+    return [
+        'online' => $online,
+        'fresh' => $fresh,
+        'weak' => $online && ! $fresh,
+        'wifi_ok' => $wifiOk,
+        'seen_at' => $seenAt,
+        'ago_sec' => $seenAt > 0 ? max(0, $now - $seenAt) : null,
+    ];
+}
+
 function talk_board_ok(string $board): bool
 {
     return $board === 'AP' || $board === 'STA';
@@ -35,7 +92,13 @@ function talk_boards_default(): array
                 'ssid' => '',
                 'ip' => '',
                 'rssi' => 0,
+                'halow_rssi' => 0,
+                'bat_mv' => 0,
+                'bat_pct' => 0,
+                'bat_usb' => 0,
+                'bat_pin' => -1,
                 'at' => 0,
+                'seen_at' => 0,
             ],
             'scan' => [],
             'scan_at' => 0,
@@ -72,7 +135,13 @@ function talk_boards_read(): array
             $data[$id]['live']['ssid'] = trim((string) ($row['live']['ssid'] ?? ''));
             $data[$id]['live']['ip'] = trim((string) ($row['live']['ip'] ?? ''));
             $data[$id]['live']['rssi'] = (int) ($row['live']['rssi'] ?? 0);
+            $data[$id]['live']['halow_rssi'] = (int) ($row['live']['halow_rssi'] ?? 0);
             $data[$id]['live']['at'] = (int) ($row['live']['at'] ?? 0);
+            $data[$id]['live']['seen_at'] = (int) ($row['live']['seen_at'] ?? 0);
+            $data[$id]['live']['bat_mv'] = (int) ($row['live']['bat_mv'] ?? 0);
+            $data[$id]['live']['bat_pct'] = (int) ($row['live']['bat_pct'] ?? 0);
+            $data[$id]['live']['bat_usb'] = (int) ($row['live']['bat_usb'] ?? 0);
+            $data[$id]['live']['bat_pin'] = (int) ($row['live']['bat_pin'] ?? -1);
         }
         if (isset($row['scan']) && is_array($row['scan'])) {
             $scan = [];
@@ -125,6 +194,9 @@ function talk_board_wifi_pick(string $board): array
     if ($pick['ssid'] !== '') {
         $out['ssid'] = $pick['ssid'];
         $out['pass'] = $pick['pass'];
+    } elseif ($board === 'STA' && ($boards['AP']['pick']['ssid'] ?? '') !== '') {
+        $out['ssid'] = $boards['AP']['pick']['ssid'];
+        $out['pass'] = $boards['AP']['pick']['pass'];
     }
 
     return $out;
@@ -190,19 +262,30 @@ function talk_board_assign(string $board, string $ssid, string $pass): void
 /**
  * @param  list<array{ssid: string, rssi: int}>  $scan
  */
-function talk_board_report(string $board, bool $connected, string $ssid, string $ip, int $rssi, array $scan): void
+function talk_board_report(string $board, bool $connected, string $ssid, string $ip, int $rssi, array $scan, int $halowRssi = 0, int $batMv = 0, int $batPct = 0, int $batUsb = 0, int $batPin = -1): void
 {
     if (! talk_board_ok($board)) {
         return;
     }
     $boards = talk_boards_read();
     $now = time();
+    $prev = $boards[$board]['live'];
+    $seenAt = (int) ($prev['seen_at'] ?? 0);
+    if ($connected) {
+        $seenAt = $now;
+    }
     $boards[$board]['live'] = [
         'connected' => $connected,
-        'ssid' => trim($ssid),
-        'ip' => trim($ip),
-        'rssi' => $rssi,
+        'ssid' => $connected ? trim($ssid) : '',
+        'ip' => $connected ? trim($ip) : '',
+        'rssi' => $connected ? $rssi : 0,
+        'halow_rssi' => $connected ? $halowRssi : 0,
+        'bat_mv' => max(0, $batMv),
+        'bat_pct' => max(0, min(100, $batPct)),
+        'bat_usb' => $batUsb ? 1 : 0,
+        'bat_pin' => $batPin,
         'at' => $now,
+        'seen_at' => $seenAt,
     ];
     if ($scan !== []) {
         $clean = [];
@@ -228,20 +311,38 @@ function talk_board_report(string $board, bool $connected, string $ssid, string 
 function talk_boards_public(): array
 {
     $boards = talk_boards_read();
+    $now = time();
     $out = [];
     foreach (talk_board_ids() as $id) {
         $row = $boards[$id];
-        $out[$id] = [
+        $seenAt = (int) ($row['live']['seen_at'] ?? 0);
+        if ($seenAt <= 0 && ! empty($row['live']['connected'])) {
+            $seenAt = (int) ($row['live']['at'] ?? 0);
+        }
+        $pub = [
             'label' => talk_board_label($id),
             'pick_ssid' => $row['pick']['ssid'],
             'connected' => $row['live']['connected'],
             'live_ssid' => $row['live']['ssid'],
             'ip' => $row['live']['ip'],
             'rssi' => $row['live']['rssi'],
+            'halow_rssi' => (int) ($row['live']['halow_rssi'] ?? 0),
+            'bat_mv' => (int) ($row['live']['bat_mv'] ?? 0),
+            'bat_pct' => (int) ($row['live']['bat_pct'] ?? 0),
+            'bat_usb' => ! empty($row['live']['bat_usb']),
+            'bat_pin' => (int) ($row['live']['bat_pin'] ?? -1),
             'live_at' => $row['live']['at'],
+            'seen_at' => $seenAt,
             'scan' => $row['scan'],
             'scan_at' => $row['scan_at'],
         ];
+        $flags = talk_board_live_flags($pub, $now);
+        if (! $flags['online']) {
+            $pub['connected'] = false;
+            $pub['live_ssid'] = '';
+            $pub['ip'] = '';
+        }
+        $out[$id] = array_merge($pub, $flags);
     }
 
     return $out;

@@ -11,11 +11,23 @@ $method = $_SERVER['REQUEST_METHOD'];
 if ($method === 'GET') {
     $token = isset($_GET['token']) ? (string) $_GET['token'] : '';
     if ($token !== '' && hash_equals($cfg['token'], $token)) {
-        echo json_encode(['ok' => true, 'boards' => talk_boards_public()], JSON_UNESCAPED_UNICODE);
+        echo json_encode([
+            'ok' => true,
+            'now' => time(),
+            'live_window' => talk_board_live_window(),
+            'live_grace' => talk_board_live_grace(),
+            'boards' => talk_boards_public(),
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
     talk_require_web();
-    echo json_encode(['ok' => true, 'boards' => talk_boards_public()], JSON_UNESCAPED_UNICODE);
+    echo json_encode([
+        'ok' => true,
+        'now' => time(),
+        'live_window' => talk_board_live_window(),
+        'live_grace' => talk_board_live_grace(),
+        'boards' => talk_boards_public(),
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -44,8 +56,13 @@ if ($token !== '' && hash_equals($cfg['token'], $token)) {
     $ssid = (string) ($body['ssid'] ?? '');
     $ip = (string) ($body['ip'] ?? '');
     $rssi = (int) ($body['rssi'] ?? 0);
+    $halowRssi = (int) ($body['halow_rssi'] ?? 0);
+    $batMv = (int) ($body['bat_mv'] ?? 0);
+    $batPct = (int) ($body['bat_pct'] ?? 0);
+    $batUsb = (int) ($body['bat_usb'] ?? 0);
+    $batPin = (int) ($body['bat_pin'] ?? -1);
     $scan = isset($body['scan']) && is_array($body['scan']) ? $body['scan'] : [];
-    talk_board_report($board, $connected, $ssid, $ip, $rssi, $scan);
+    talk_board_report($board, $connected, $ssid, $ip, $rssi, $scan, $halowRssi, $batMv, $batPct, $batUsb, $batPin);
     echo '{"ok":true}';
     exit;
 }

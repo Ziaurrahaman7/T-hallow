@@ -2,6 +2,11 @@
 
 #include "net_config.h"
 #include "fw_version.h"
+#include "battery.h"
+
+#ifndef NET_GET_HALOW_RSSI
+#define NET_GET_HALOW_RSSI() 0
+#endif
 
 #if NET_ON
 
@@ -143,7 +148,8 @@ static int netJsonEsc(const char* in, char* out, int cap) {
   return o;
 }
 
-static void netScanFill() {
+// Full scan while connected drops many APs — only call when disconnected or dashboard rescan.
+static void netScanFillConnectedOk() {
   netApplyRadioProfile();
   int n = WiFi.scanNetworks(false, true, false, NET_WIFI_SCAN_MS);
   int p = 0;
@@ -170,6 +176,11 @@ static void netScanFill() {
   }
   WiFi.scanDelete();
   netScanMs = millis();
+}
+
+static void netScanFill() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  netScanFillConnectedOk();
 }
 
 static bool netJsonField(const char* json, const char* key, char* out, int cap) {
@@ -336,9 +347,23 @@ static bool netPostLeaf(const char* leaf, const char* body, int len) {
   return false;
 }
 
+static void netReportOffline() {
+  char rep[160];
+  int len = snprintf(rep, sizeof(rep),
+                     "{\"token\":\"%s\",\"board\":\"%s\",\"connected\":0,\"ssid\":\"\","
+                     "\"ip\":\"\",\"rssi\":0,\"halow_rssi\":0,\"scan\":[]}",
+                     NET_TOKEN, netBoard);
+  if (len <= 0 || len >= (int)sizeof(rep)) return;
+  netPostLeaf("net.php", rep, len);
+}
+
 static void netReport() {
   if (WiFi.status() != WL_CONNECTED) return;
-  if (netScanMs == 0 || (uint32_t)(millis() - netScanMs) > 45000) netScanFill();
+  static uint32_t lastBatSample = 0;
+  if (lastBatSample == 0 || (uint32_t)(millis() - lastBatSample) > 45000) {
+    lastBatSample = millis();
+    batterySample();
+  }
   char ssidEsc[40];
   netJsonEsc(WiFi.SSID().c_str(), ssidEsc, sizeof(ssidEsc));
   IPAddress ip = WiFi.localIP();
@@ -346,8 +371,11 @@ static void netReport() {
   int len = snprintf(
       rep, sizeof(rep),
       "{\"token\":\"%s\",\"board\":\"%s\",\"connected\":1,\"ssid\":\"%s\","
-      "\"ip\":\"%u.%u.%u.%u\",\"rssi\":%d,\"scan\":%s}",
+      "\"ip\":\"%u.%u.%u.%u\",\"rssi\":%d,\"halow_rssi\":%d,"
+      "\"bat_mv\":%d,\"bat_pct\":%d,\"bat_usb\":%d,\"bat_pin\":%d,\"scan\":%s}",
       NET_TOKEN, netBoard, ssidEsc, ip[0], ip[1], ip[2], ip[3], WiFi.RSSI(),
+      NET_GET_HALOW_RSSI(), batteryGetMv(), batteryGetPct(), batteryGetUsb(),
+      batteryGetPin(),
       netScanJson[0] ? netScanJson : "[]");
   if (len <= 0 || len >= (int)sizeof(rep)) return;
   netPostLeaf("net.php", rep, len);
@@ -355,7 +383,7 @@ static void netReport() {
 
 static void netReportSoon() {
   if (WiFi.status() != WL_CONNECTED) return;
-  netScanFill();
+  netScanFillConnectedOk();
   netReport();
 }
 
@@ -601,10 +629,20 @@ static void netTask(void*) {
     return;
   }
   uint32_t lastBegin = millis();
+  static bool netWasWifi = false;
+  static uint32_t netWifiLostMs = 0;
   for (;;) {
     if (WiFi.status() != WL_CONNECTED) {
+      if (netWasWifi) {
+        if (netWifiLostMs == 0) netWifiLostMs = millis();
+        if ((uint32_t)(millis() - netWifiLostMs) > 8000) {
+          netWasWifi = false;
+          netWifiLostMs = 0;
+          netReportOffline();
+        }
+      }
       netState = 1;
-      if (millis() - lastBegin > 10000) {
+      if (millis() - lastBegin > 5000) {
         lastBegin = millis();
         int st = (int)WiFi.status();
         if (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL || st == WL_CONNECTION_LOST) {
@@ -622,10 +660,15 @@ static void netTask(void*) {
       continue;
     }
     if (netState != 2) netRadio();
+    netWasWifi = true;
+    netWifiLostMs = 0;
     static bool netSynced = false;
     if (!netSynced) {
       netSynced = true;
       netPullWifi();
+      if (netScanJson[0] == 0 || (netScanJson[0] == '[' && netScanJson[1] == ']' && netScanJson[2] == 0)) {
+        netScanFillConnectedOk();
+      }
       netReport();
     }
     lastBegin = millis();
@@ -664,7 +707,7 @@ static void netTask(void*) {
       netWifiPoll = now;
       netPullWifi();
     }
-    if (now - netRepPoll > 18000) {
+    if (now - netRepPoll > 12000) {
       netRepPoll = now;
       netReport();
     }
@@ -678,6 +721,7 @@ static void netTask(void*) {
 }
 
 static void netBegin(const char* board) {
+  batteryInit();
   netInitUploads();
   netLoadCreds();
   if (netSsid[0] == '\0' && NET_SSID[0] == '\0' && NET_SSID2[0] == '\0') {
