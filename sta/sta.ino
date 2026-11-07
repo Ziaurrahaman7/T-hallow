@@ -2,7 +2,7 @@
 // STA board. Upload to the board whose speaker is on GPIO7/6/15.
 // MAX98357A: BCLK=GPIO7  LRC=GPIO6  DIN=GPIO15  GND=GND  VIN=VBAT
 // INMP441: SCK=GPIO17  WS=GPIO16  SD=GPIO18  VDD=3.3V  GND=GND  L/R=GND
-// PTT: GPIO14 — button other leg to GND (both AP and STA).
+// PTT: IO14↔GND | Vol+: IO12↔GND | Vol−: IO13↔GND (momentary, 4-pin = use one pair each).
 // Talks both ways. Plays AP magic A5 5A A5 5A. Own voice uses A5 5A 5A A5.
 
 #include <Arduino.h>
@@ -26,7 +26,7 @@ static HWCDC MonPort;
 #define PCM_N 321
 #define PAYLOAD 163
 #define DECIM 2
-#define SHIFT 11
+#define SHIFT 10
 #define RING 2048
 
 static const uint8_t PLAY_MAGIC[4] = {0xA5, 0x5A, 0xA5, 0x5A};
@@ -180,8 +180,8 @@ static void micTask(void *) {
       if (v > 32767) v = 32767;
       if (v < -32768) v = -32768;
       int32_t a = v < 0 ? -v : v;
-      if (a > 22000) {
-        int32_t shaped = 22000 + (a - 22000) / 4;
+      if (a > 26000) {
+        int32_t shaped = 26000 + (a - 26000) / 3;
         v = v < 0 ? -shaped : shaped;
       }
       if (v > 32767) v = 32767;
@@ -391,18 +391,18 @@ void playPacket(uint8_t* p) {
     if (a > peak) peak = a;
     if (a >= 400) strong++;
   }
-  if (peak < 280 || strong < 5) return;
+  if (peak < 360 || strong < 6) return;
 
   rxCount++;
-  bool start = peak >= 600 && strong >= 8;
+  bool start = peak >= 650 && strong >= 8;
   if (start) phraseMs = millis();
   bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 900;
   if (!phrase) return;
   speakerOpen();
   if (!spkOn) return;
   if (!wasTalk) {
-    for (int i = 0; i < 48 && i < PCM_N; i++) {
-      pcm[i] = (int16_t)((int32_t)pcm[i] * i / 48);
+    for (int i = 0; i < 24 && i < PCM_N; i++) {
+      pcm[i] = (int16_t)((int32_t)pcm[i] * i / 24);
     }
   }
   wasTalk = true;
@@ -569,6 +569,7 @@ void setup() {
 }
 
 void loop() {
+  volButtonsPoll();
   netPoll();
   pumpUart();
   halowPollPeerRssi(SerialAH, feedByte, !pttPressed() && !spkOn && rxqN == 0 && !wasTalk);
@@ -602,7 +603,7 @@ void loop() {
         int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
         if (a >= 500) nLoud++;
       }
-      bool shaped = peak >= 800 && nStrong >= 8;
+      bool shaped = peak >= 850 && nStrong >= 9;
       if (shaped) voicedMs = millis();
       uint32_t nowMs = millis();
       bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs);

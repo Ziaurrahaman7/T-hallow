@@ -2,7 +2,7 @@
 // AP board. Upload to the board whose mic is on GPIO7/6/15.
 // INMP441: SCK=GPIO7  WS=GPIO6  SD=GPIO15  VDD=3.3V  GND=GND  L/R=GND
 // MAX98357A: BCLK=GPIO17  LRC=GPIO16  DIN=GPIO18  VIN=VBAT  GND=GND
-// PTT: GPIO14 — button other leg to GND (both AP and STA).
+// PTT: IO14↔GND | Vol+: IO12↔GND | Vol−: IO13↔GND (momentary, 4-pin = use one pair each).
 // Talks both ways. Own voice uses magic A5 5A A5 5A. Plays STA magic A5 5A 5A A5.
 
 #include <Arduino.h>
@@ -17,7 +17,7 @@ static HWCDC MonPort;
 #define PCM_N 321
 #define PAYLOAD 163
 #define DECIM 2
-#define SHIFT 11
+#define SHIFT 10
 #define RING 2048
 #define SAMPLES 163
 
@@ -121,7 +121,8 @@ void at(const char *cmd) {
 }
 
 bool setupI2S() {
-  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+  // Mic on I2S1 (speaker uses I2S0 first — same order as STA board).
+  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
   esp_err_t okChan = i2s_new_channel(&chan, NULL, &micIn);
   i2s_std_config_t cfg = {
     .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
@@ -246,6 +247,13 @@ void micTask(void *) {
       delay(20);
       continue;
     }
+#if PTT_HALF_DUPLEX
+    // While remote plays on AP speaker, skip mic reads (less I2S/PSU noise on MAX98357).
+    if (spkOn && !pttPressed()) {
+      delay(4);
+      continue;
+    }
+#endif
     size_t nbytes = 0;
     i2s_channel_read(micIn, raw, sizeof(raw), &nbytes, portMAX_DELAY);
     int n = (int)(nbytes / sizeof(int32_t));
@@ -283,8 +291,8 @@ void micTask(void *) {
       if (v > 32767) v = 32767;
       if (v < -32768) v = -32768;
       int32_t a = v < 0 ? -v : v;
-      if (a > 22000) {
-        int32_t shaped = 22000 + (a - 22000) / 4;
+      if (a > 26000) {
+        int32_t shaped = 26000 + (a - 26000) / 3;
         v = v < 0 ? -shaped : shaped;
       }
       if (v > 32767) v = 32767;
@@ -378,7 +386,11 @@ static void fadeOut() {
 
 static void speakerOpen() {
   if (spk == NULL || spkOn) return;
-  if (i2s_channel_enable(spk) == ESP_OK) spkOn = true;
+  if (i2s_channel_enable(spk) == ESP_OK) {
+    spkOn = true;
+  } else {
+    monPrint("spk en fail\n");
+  }
 }
 
 static void speakerClose() {
@@ -416,18 +428,18 @@ static void playPacket(uint8_t* p) {
     if (a > peak) peak = a;
     if (a >= 400) strong++;
   }
-  if (peak < 280 || strong < 5) return;
+  if (peak < 360 || strong < 6) return;
 
   rxCount++;
-  bool start = peak >= 600 && strong >= 8;
+  bool start = peak >= 650 && strong >= 8;
   if (start) phraseMs = millis();
   bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 900;
   if (!phrase) return;
   speakerOpen();
   if (!spkOn) return;
   if (!wasTalk) {
-    for (int i = 0; i < 48 && i < PCM_N; i++) {
-      pcm[i] = (int16_t)((int32_t)pcm[i] * i / 48);
+    for (int i = 0; i < 24 && i < PCM_N; i++) {
+      pcm[i] = (int16_t)((int32_t)pcm[i] * i / 24);
     }
   }
   wasTalk = true;
@@ -469,7 +481,7 @@ static void flushReceiveAudio() {
 }
 
 static void playQueued() {
-  for (int drain = 0; rxqN > 0 && drain < 2; drain++) {
+  for (int drain = 0; rxqN > 0 && drain < 5; drain++) {
     uint8_t tmp[SAMPLES];
     memcpy(tmp, rxq[0], SAMPLES);
     if (rxqN > 1) memmove(rxq[0], rxq[1], (size_t)(rxqN - 1) * SAMPLES);
@@ -532,7 +544,7 @@ bool sendPacket(const uint8_t *audio) {
 }
 
 static bool setupSpeaker() {
-  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
   chan.auto_clear = true;
   esp_err_t okChan = i2s_new_channel(&chan, &spk, NULL);
   i2s_std_config_t cfg = {
@@ -565,13 +577,14 @@ static bool setupSpeaker() {
 void setup() {
   monBegin();
   pttBegin();
+  playGainNum = 12;
   delay(200);
   SerialAH.setRxBufferSize(2048);
   SerialAH.setTxBufferSize(1024);
   SerialAH.begin(115200, SERIAL_8N1, 4, 5);
 
-  if (setupI2S()) xTaskCreatePinnedToCore(micTask, "mic", 8192, NULL, 3, NULL, 0);
   setupSpeaker();
+  if (setupI2S()) xTaskCreatePinnedToCore(micTask, "mic", 8192, NULL, 3, NULL, 0);
 
   delay(1200);
   while (SerialAH.available()) SerialAH.read();
@@ -608,6 +621,7 @@ void setup() {
 }
 
 void loop() {
+  volButtonsPoll();
   netPoll();
   pumpUart();
   halowPollPeerRssi(SerialAH, feedByte, !pttPressed() && !spkOn && rxqN == 0 && !wasTalk);
@@ -641,7 +655,7 @@ void loop() {
       int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
       if (a >= 500) nLoud++;
     }
-    bool shaped = peak >= 800 && nStrong >= 8;
+    bool shaped = peak >= 850 && nStrong >= 9;
     if (shaped) voicedMs = millis();
     uint32_t nowMs = millis();
     bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs);
