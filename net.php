@@ -18,12 +18,14 @@ talk_dash_main_open();
 <div class="page-top">
   <div>
     <h1 class="page-title">বোর্ড Wi‑Fi</h1>
-    <p class="page-lead">প্রতিটি বোর্ডের কাছে যে নেটওয়ার্ক আছে — সেটাই তালিকায়। ল্যাপটপ/ফোনের Wi‑Fi list নয়।</p>
+    <p class="page-lead">বোর্ড যেখানেই থাকুক — নিজে স্ক্যান করে তালিকা সার্ভারে পাঠায় (প্রতি ~৪ মিনিট + সংযোগের সময়)। ল্যাপটপের Wi‑Fi list নয়।</p>
   </div>
 </div>
 <div class="info-stack">
   <p class="note">নেটওয়ার্ক বেছে নিন → পাসওয়ার্ড → Connect। শুধু সেই বোর্ডে Wi‑Fi সেট হবে (AP ও STA আলাদা)।</p>
-  <p class="note warn">তালিকা বোর্ড স্ক্যান থেকে আসে। সার্ভারে রিপোর্ট না এলে «নাম লিখে সংযোগ» দিয়ে SSID+পাস সেভ করুন — online হলে apply।</p>
+  <p class="note warn">তালিকা <strong>ল্যাপটপের Wi‑Fi নয়</strong> — বোর্ড যেখানে দাঁড়িয়ে সেখানকার নেট স্ক্যান করে সার্ভারে পাঠায়। বোর্ড PC-র নেটে না থাকলে তালিকা খালি থাকে (HaLow কথা আলাদা)।</p>
+  <p class="note warn">অন্য জায়গায় গেলে: PC+বোর্ড একই Wi‑Fi (ফোন হটস্পট), <code>tools/set_local_ip.ps1</code> → নতুন IP + <code>shared/net_config.local.h</code>-এ SSID/পাস → AP/STA re-flash; অথবা আগের মতোই হটস্পট নাম+পাস রেখে <a href="index.php#wifi">সার্ভার</a> প্যানেলে শুধু Upload URL আপডেট।</p>
+  <p class="note warn">পুরনো SSID মুছতে: নেট «থাকা» নেই দেখালে Disconnect → ২ মিনিট পর firmware-এর ডিফল্ট SSID চেষ্টা; নাম লিখে সংযোগ = online হলে apply।</p>
   <p class="note">API: <code><?php echo htmlspecialchars($boardApi, ENT_QUOTES, 'UTF-8'); ?></code></p>
 </div>
 <div class="boards" id="boards"></div>
@@ -311,6 +313,6 @@ document.addEventListener('focusout', (e) => {
 });
 
 refresh(true);
-setInterval(() => refresh(false), 12000);
+setInterval(() => refresh(false), 8000);
 </script>
 <?php talk_dash_main_close(); talk_dash_end(); ?>

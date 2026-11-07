@@ -257,6 +257,8 @@ function talk_board_assign(string $board, string $ssid, string $pass): void
     ];
     $boards[$board]['cmd'] = '';
     talk_boards_write($boards);
+    require_once __DIR__ . '/store.php';
+    talk_wifi_save($ssid, $pass);
 }
 
 /**

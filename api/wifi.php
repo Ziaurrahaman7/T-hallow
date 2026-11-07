@@ -15,6 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         exit;
     }
     $board = isset($_GET['board']) ? strtoupper((string) $_GET['board']) : '';
+    $wifi = talk_wifi_read();
     if (talk_board_ok($board)) {
         $pick = talk_board_wifi_pick($board);
         talk_board_wifi_ack($board);
@@ -25,10 +26,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
             'disconnect' => (int) ($pick['disconnect'] ?? 0),
             'scan' => (int) ($pick['scan'] ?? 0),
             'uploads' => talk_upload_urls(),
+            'networks' => $wifi['networks'],
         ], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    $wifi = talk_wifi_read();
     echo json_encode([
         'ok' => true,
         'ssid' => $wifi['ssid'],
@@ -36,6 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         'disconnect' => 0,
         'scan' => 0,
         'uploads' => talk_upload_urls(),
+        'networks' => $wifi['networks'],
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
