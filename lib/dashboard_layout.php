@@ -255,7 +255,16 @@ function talk_dash_page_header(string $title, string $subtitle = ''): void
 
 function talk_dash_login_render(string $loginError, bool $bad, string $oldUser): void
 {
-    talk_dash_head('সাইন ইন', ['login.css']);
+    $t = htmlspecialchars('সাইন ইন', ENT_QUOTES, 'UTF-8');
+    echo '<!DOCTYPE html><html lang="bn"><head>';
+    echo '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
+    echo '<title>' . $t . ' · হ্যালো</title>';
+    echo '<link rel="preconnect" href="https://fonts.googleapis.com">';
+    echo '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>';
+    echo '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700&display=swap" rel="stylesheet">';
+    echo '<link rel="stylesheet" href="' . htmlspecialchars(talk_dash_asset('dashboard.css'), ENT_QUOTES, 'UTF-8') . '">';
+    echo '<link rel="stylesheet" href="' . htmlspecialchars(talk_dash_asset('login.css'), ENT_QUOTES, 'UTF-8') . '">';
+    echo '</head><body class="login-page">';
     echo '<div class="login-wrap"><form class="card login-card" method="post" action="index.php" autocomplete="on">';
     echo '<span class="login-logo">' . talk_dash_icon('logo') . '</span>';
     echo '<h1>হ্যালো</h1><p class="page-lead">কথোপকথন ও বোর্ড মনিটরিং</p>';
