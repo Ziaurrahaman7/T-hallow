@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <string.h>
 
+#include "voice_mode.h"
+
 #ifndef VOICE_AIR_PAYLOAD
 #define VOICE_AIR_PAYLOAD 163
 #endif
@@ -80,7 +82,11 @@ static inline bool voiceAirPayloadOk(const uint8_t* p) {
     if (p[i] != prev) varied++;
     if (p[i] != 0xFF && p[i] != 0x00) varied++;
   }
+#if VOICE_AIR_RELAX_OK
+  if (varied < 2) return false;
+#else
   if (varied < 3) return false;
+#endif
   return true;
 }
 
@@ -98,9 +104,11 @@ static inline bool voiceAirFinish(VoiceAirRx* r, bool* ready) {
   if (r->newFmt && voiceAirSeqDup(r, r->seq)) {
     return false;
   }
+#if VOICE_RX_BODY_DEDUP
   if (voiceAirBodyDup(r)) {
     return false;
   }
+#endif
   if (r->newFmt) voiceAirSeqMark(r, r->seq);
   voiceAirBodyMark(r);
   *ready = true;

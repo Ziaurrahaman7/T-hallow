@@ -1,0 +1,127 @@
+.bat-grid {
+  display: grid;
+  gap: 20px;
+  max-width: 900px;
+}
+
+@media (min-width: 640px) {
+  .bat-grid { grid-template-columns: 1fr 1fr; }
+}
+
+.bat-card {
+  padding: 22px 24px;
+}
+
+.bat-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.bat-card-head h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.bat-card-head .role {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.bat-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+  color: var(--muted);
+}
+
+.bat-status.on { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+.bat-status.off { color: var(--muted); }
+
+.bat-status .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+.bat-status.on .dot { background: var(--success); }
+
+.bat-meter {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.bat-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--accent);
+  flex: none;
+}
+
+.bat-icon.low { color: var(--danger); }
+.bat-icon.mid { color: var(--warn); }
+.bat-icon.charge { color: #64748b; }
+
+.bat-pct {
+  font-size: 42px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.bat-pct span {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.bat-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.bat-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
+  transition: width 0.4s ease;
+}
+
+.bat-bar.low i { background: linear-gradient(90deg, #f87171, #dc2626); }
+.bat-bar.mid i { background: linear-gradient(90deg, #fbbf24, #d97706); }
+
+.bat-meta {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.bat-meta strong { color: var(--ink); font-weight: 600; }
+
+.bat-empty {
+  font-size: 15px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.info-stack { max-width: 720px; margin-bottom: 20px; }
