@@ -1,6 +1,6 @@
-﻿#pragma once
-// Laragon: PC + board same Wi-Fi. IP à¦¬à¦¦à¦²à¦¾à¦²à§‡ à¦à¦‡ à¦¸à§à¦•à§à¦°à¦¿à¦ªà§à¦Ÿ à¦šà¦¾à¦²à¦¾à¦¨, à¦¤à¦¾à¦°à¦ªà¦° AP/STA flashà¥¤
-#define NET_URL "http://192.168.1.26/T-hallow/api/upload.php"
+#pragma once
+// Auto dashboard sync 2026-11-10T12:48:43+00:00 — re-flash AP/STA after IP/path change.
+#define NET_URL "http://10.63.77.179/T-hallow/api/upload.php"
 #define NET_URL_ALT ""
-#define NET_SSID "Primacy02"
-#define NET_PASS "@primacy 2020"
+#define NET_SSID "Redmi 13C"
+#define NET_PASS "1234567a"

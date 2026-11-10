@@ -1,8 +1,11 @@
 # Writes data/local.json + shared/net_config.local.h from this PC's IPv4 (skip loopback/APIPA).
-$ip = Get-NetIPAddress -AddressFamily IPv4 |
-  Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
-  Sort-Object InterfaceMetric |
-  Select-Object -First 1 -ExpandProperty IPAddress
+$ip = & (Join-Path $PSScriptRoot 'get_lan_ip.ps1') | Select-Object -First 1
+if (-not $ip) {
+  $ip = Get-NetIPAddress -AddressFamily IPv4 |
+    Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
+    Sort-Object InterfaceMetric |
+    Select-Object -First 1 -ExpandProperty IPAddress
+}
 if (-not $ip) {
   Write-Host "No IPv4 found. Set data/local.json manually."
   exit 1

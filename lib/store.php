@@ -8,7 +8,7 @@ function talk_live_upload_url(): string
 }
 
 /** PC LAN URL so boards (not on localhost) can reach Laragon. data/local.json */
-function talk_lan_base(): ?string
+function talk_lan_base_read_file(): ?string
 {
     $file = talk_paths()['root'].'/local.json';
     if (! is_file($file)) {
@@ -21,6 +21,18 @@ function talk_lan_base(): ?string
     $base = trim((string) ($data['lan_base'] ?? ''));
 
     return $base !== '' ? rtrim($base, '/') : null;
+}
+
+function talk_lan_base(): ?string
+{
+    if (PHP_SAPI !== 'cli' && ! empty($_SERVER['REQUEST_METHOD']) && talk_is_local_dev_host()) {
+        $live = talk_lan_base_for_boards(talk_lan_base_read_file(), false);
+        if ($live !== null) {
+            return rtrim($live, '/');
+        }
+    }
+
+    return talk_lan_base_read_file();
 }
 
 function talk_device_upload_url(): string
@@ -155,7 +167,385 @@ function talk_servers_save(array $uploads): void
  */
 function talk_upload_urls(): array
 {
-    return talk_servers_read()['uploads'];
+    $uploads = talk_servers_read()['uploads'];
+    if (PHP_SAPI !== 'cli' && ! empty($_SERVER['REQUEST_METHOD']) && talk_is_local_dev_host()) {
+        $lan = talk_lan_base();
+        if ($lan !== null) {
+            $primary = rtrim($lan, '/').'/api/upload.php';
+            $out = [$primary];
+            foreach ($uploads as $url) {
+                $url = rtrim((string) $url, '/');
+                if ($url === '' || $url === rtrim($primary, '/')) {
+                    continue;
+                }
+                if (str_contains($url, 'hallow.mmgbd.com') && count($out) < 2) {
+                    $out[] = $url;
+                }
+            }
+
+            return $out;
+        }
+    }
+
+    return $uploads;
+}
+
+function talk_local_json_file(): string
+{
+    return talk_paths()['root'].'/local.json';
+}
+
+function talk_net_config_local_h(): string
+{
+    return dirname(__DIR__).'/shared/net_config.local.h';
+}
+
+function talk_http_host_name(): string
+{
+    $host = strtolower((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    $host = preg_replace('/:\d+$/', '', $host);
+
+    return $host;
+}
+
+/** Laragon / LAN dashboard — not the public live site. */
+function talk_is_local_dev_host(?string $host = null): bool
+{
+    $host ??= talk_http_host_name();
+    if ($host === '' || $host === 'hallow.mmgbd.com' || $host === 'www.hallow.mmgbd.com') {
+        return false;
+    }
+    if ($host === 'localhost' || $host === '127.0.0.1' || $host === '[::1]' || $host === '::1') {
+        return true;
+    }
+    if (str_ends_with($host, '.test') || str_ends_with($host, '.local')) {
+        return true;
+    }
+    if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+        return filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false;
+    }
+
+    return false;
+}
+
+/** Web path prefix (e.g. /T-hallow) or "" when vhost docroot is the app. */
+function talk_web_app_path(): string
+{
+    $sn = (string) ($_SERVER['SCRIPT_NAME'] ?? '');
+    if ($sn === '') {
+        return '';
+    }
+    if (str_contains($sn, '/api/')) {
+        $path = substr($sn, 0, strpos($sn, '/api/'));
+    } elseif (str_ends_with($sn, '/index.php')) {
+        $path = dirname($sn);
+    } elseif (str_ends_with($sn, '/net.php') || str_ends_with($sn, '/status.php') || str_ends_with($sn, '/battery.php')) {
+        $path = dirname($sn);
+    } else {
+        $path = dirname($sn);
+    }
+    if ($path === '/' || $path === '\\' || $path === '.') {
+        return '';
+    }
+
+    return $path;
+}
+
+function talk_lan_ip_cache_file(): string
+{
+    return talk_paths()['root'].'/lan_ip_cache.json';
+}
+
+/**
+ * @return list<string>
+ */
+function talk_all_lan_ipv4(bool $refresh = false): array
+{
+    $cacheFile = talk_lan_ip_cache_file();
+    if (! $refresh && is_file($cacheFile)) {
+        $data = json_decode((string) file_get_contents($cacheFile), true);
+        if (is_array($data) && isset($data['ips']) && is_array($data['ips'])) {
+            $age = time() - (int) ($data['at'] ?? 0);
+            if ($age >= 0 && $age < 900) {
+                $ips = [];
+                foreach ($data['ips'] as $ip) {
+                    $ip = trim((string) $ip);
+                    if (filter_var($ip, FILTER_VALIDATE_IP)) {
+                        $ips[] = $ip;
+                    }
+                }
+                if ($ips !== []) {
+                    return array_values(array_unique($ips));
+                }
+            }
+        }
+    }
+
+    $ips = [];
+    if (DIRECTORY_SEPARATOR === '\\') {
+        $script = dirname(__DIR__).'/tools/get_lan_ips.ps1';
+        if (is_file($script)) {
+            $cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File '
+                .escapeshellarg(str_replace('/', '\\', $script));
+            $out = @shell_exec($cmd);
+            if (is_string($out) && trim($out) !== '') {
+                foreach (preg_split('/\R+/', trim($out)) as $line) {
+                    $line = trim($line);
+                    if (filter_var($line, FILTER_VALIDATE_IP)) {
+                        $ips[] = $line;
+                    }
+                }
+            }
+        }
+    }
+    if ($ips === []) {
+        $one = talk_detect_lan_ipv4_fallback();
+        if ($one !== null) {
+            $ips = [$one];
+        }
+    }
+    $ips = array_values(array_unique($ips));
+    if ($ips !== []) {
+        @file_put_contents(
+            $cacheFile,
+            json_encode(['ips' => $ips, 'at' => time()], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
+        );
+    }
+
+    return $ips;
+}
+
+function talk_detect_lan_ipv4_fallback(): ?string
+{
+    if (DIRECTORY_SEPARATOR === '\\') {
+        $script = dirname(__DIR__).'/tools/get_lan_ip.ps1';
+        if (is_file($script)) {
+            $cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File '
+                .escapeshellarg(str_replace('/', '\\', $script));
+            $out = @shell_exec($cmd);
+            if (is_string($out)) {
+                $ip = trim($out);
+                if (filter_var($ip, FILTER_VALIDATE_IP)) {
+                    return $ip;
+                }
+            }
+        }
+    }
+    if (function_exists('socket_create')) {
+        $sock = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+        if ($sock !== false) {
+            @socket_connect($sock, '8.8.8.8', 80);
+            $addr = '';
+            if (@socket_getsockname($sock, $addr) && $addr !== '' && $addr !== '127.0.0.1') {
+                @socket_close($sock);
+
+                return $addr;
+            }
+            @socket_close($sock);
+        }
+    }
+    $srv = (string) ($_SERVER['SERVER_ADDR'] ?? '');
+    if ($srv !== '' && $srv !== '127.0.0.1' && $srv !== '::1') {
+        return $srv;
+    }
+    $name = gethostname();
+    if (is_string($name) && $name !== '') {
+        $ip = gethostbyname($name);
+        if ($ip !== '' && $ip !== $name && $ip !== '127.0.0.1') {
+            return $ip;
+        }
+    }
+
+    return null;
+}
+
+function talk_detect_lan_ipv4(?string $prefer = null, bool $refresh = false): ?string
+{
+  $ips = talk_all_lan_ipv4($refresh);
+  $home = array_values(array_filter(
+      $ips,
+      static fn (string $ip): bool => str_starts_with($ip, '192.168.')
+  ));
+  if ($home !== []) {
+      if ($prefer !== null && $prefer !== '' && in_array($prefer, $home, true)) {
+          return $prefer;
+      }
+
+      return $home[0];
+  }
+  if ($prefer !== null && $prefer !== '' && in_array($prefer, $ips, true)) {
+    return $prefer;
+  }
+  if ($ips !== []) {
+    usort($ips, static function (string $a, string $b): int {
+      $rank = static function (string $ip): int {
+        if (str_starts_with($ip, '192.168.')) {
+          return 0;
+        }
+        if (str_starts_with($ip, '10.')) {
+          return 2;
+        }
+
+        return 1;
+      };
+      $ra = $rank($a);
+      $rb = $rank($b);
+      if ($ra !== $rb) {
+        return $ra <=> $rb;
+      }
+
+      return strcmp($a, $b);
+    });
+
+    return $ips[0];
+  }
+
+  return talk_detect_lan_ipv4_fallback();
+}
+
+function talk_lan_base_for_boards(?string $prevBase = null, bool $refreshIps = false): ?string
+{
+    $host = talk_http_host_name();
+    $prefer = null;
+    $prev = $prevBase ?? talk_lan_base_read_file();
+    if ($prev !== null && preg_match('#^https?://([^/]+)#i', $prev, $m)) {
+        $prefer = $m[1];
+    }
+    if (filter_var($host, FILTER_VALIDATE_IP) && talk_is_local_dev_host($host)) {
+        $ip = $host;
+    } else {
+        $ip = talk_detect_lan_ipv4($prefer, $refreshIps);
+    }
+    if ($ip === null) {
+        return null;
+    }
+    $path = talk_web_app_path();
+
+    return 'http://'.$ip.$path;
+}
+
+function talk_net_header_wifi_defaults(): array
+{
+    $ssid = '';
+    $pass = '';
+    $file = talk_net_config_local_h();
+    if (is_file($file)) {
+        $text = (string) file_get_contents($file);
+        if (preg_match('/#define\s+NET_SSID\s+"((?:\\\\.|[^"\\\\])*)"/', $text, $m)) {
+            $ssid = stripcslashes($m[1]);
+        }
+        if (preg_match('/#define\s+NET_PASS\s+"((?:\\\\.|[^"\\\\])*)"/', $text, $m)) {
+            $pass = stripcslashes($m[1]);
+        }
+    }
+    if ($ssid === '') {
+        $text = (string) @file_get_contents(dirname(__DIR__).'/shared/net_config.h');
+        if (preg_match('/#define\s+NET_SSID\s+"((?:\\\\.|[^"\\\\])*)"/', $text, $m)) {
+            $ssid = stripcslashes($m[1]);
+        }
+        if (preg_match('/#define\s+NET_PASS\s+"((?:\\\\.|[^"\\\\])*)"/', $text, $m)) {
+            $pass = stripcslashes($m[1]);
+        }
+    }
+
+    return ['ssid' => $ssid, 'pass' => $pass];
+}
+
+function talk_write_net_config_local_h(string $lanBase, string $ssid, string $pass): void
+{
+    $upload = rtrim($lanBase, '/').'/api/upload.php';
+    $body = "#pragma once\n"
+        ."// Auto dashboard sync ".date('c')." — re-flash AP/STA after IP/path change.\n"
+        .'#define NET_URL '.talk_c_quote($upload)."\n"
+        ."#define NET_URL_ALT \"\"\n"
+        .'#define NET_SSID '.talk_c_quote($ssid)."\n"
+        .'#define NET_PASS '.talk_c_quote($pass)."\n";
+    $file = talk_net_config_local_h();
+    if (is_file($file)) {
+        $old = (string) file_get_contents($file);
+        if ($old === $body) {
+            return;
+        }
+    }
+    file_put_contents($file, $body);
+}
+
+/**
+ * localhost / .test / LAN IP দিয়ে ড্যাশবোর্ড খুললে boards এর জন্য lan_base + uploads + net_config.local.h আপডেট।
+ */
+function talk_sync_local_lan_if_needed(): void
+{
+    static $ran = false;
+    if ($ran) {
+        return;
+    }
+    $ran = true;
+    if (PHP_SAPI === 'cli' || empty($_SERVER['REQUEST_METHOD'])) {
+        return;
+    }
+    if (! talk_is_local_dev_host()) {
+        return;
+    }
+    $lanBase = talk_lan_base_for_boards(null, true);
+    if ($lanBase === null) {
+        return;
+    }
+    $upload = rtrim($lanBase, '/').'/api/upload.php';
+    $host = talk_http_host_name();
+    $changed = false;
+
+    $localFile = talk_local_json_file();
+    $prevBase = talk_lan_base_read_file();
+    if ($prevBase === null || rtrim($prevBase, '/') !== rtrim($lanBase, '/')) {
+        $dir = talk_paths()['root'];
+        if (! is_dir($dir)) {
+            mkdir($dir, 0777, true);
+        }
+        file_put_contents(
+            $localFile,
+            json_encode(
+                [
+                    'lan_base' => $lanBase,
+                    'browser' => 'http://'.$host.talk_web_app_path(),
+                    'note' => 'Auto sync '.date('c'),
+                ],
+                JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT
+            )
+        );
+        $changed = true;
+    }
+
+    $wantUploads = [$upload];
+    $existing = talk_servers_read()['uploads'];
+    foreach ($existing as $u) {
+        $u = rtrim((string) $u, '/');
+        if ($u === '' || $u === rtrim($upload, '/')) {
+            continue;
+        }
+        if (str_contains($u, 'hallow.mmgbd.com') && count($wantUploads) < 2) {
+            $wantUploads[] = $u;
+        }
+    }
+    $norm = static fn (array $list): array => array_map(
+        static fn ($u) => rtrim((string) $u, '/'),
+        $list
+    );
+  if ($norm($existing) !== $norm($wantUploads) || ! isset($existing[0]) || rtrim((string) $existing[0], '/') !== rtrim($upload, '/')) {
+    talk_servers_save($wantUploads);
+    $changed = true;
+  }
+
+    $wifi = talk_net_header_wifi_defaults();
+    talk_write_net_config_local_h($lanBase, $wifi['ssid'], $wifi['pass']);
+
+    if ($changed) {
+        $GLOBALS['talk_local_sync_note'] = $lanBase;
+    }
+}
+
+function talk_local_sync_note(): string
+{
+    return (string) ($GLOBALS['talk_local_sync_note'] ?? '');
 }
 
 function talk_paths(): array
@@ -766,4 +1156,22 @@ function talk_require_web(): void
     header('Cache-Control: no-store');
     echo '{"ok":false,"err":"login"}';
     exit;
+}
+
+function talk_should_auto_sync_local(): bool
+{
+    $sn = (string) ($_SERVER['SCRIPT_NAME'] ?? '');
+    if (str_ends_with($sn, '/index.php') || str_ends_with($sn, '/net.php')
+        || str_ends_with($sn, '/status.php') || str_ends_with($sn, '/battery.php')) {
+        return true;
+    }
+    if (str_ends_with($sn, '/api/wifi.php') && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+        return true;
+    }
+
+    return false;
+}
+
+if (PHP_SAPI !== 'cli' && talk_should_auto_sync_local()) {
+    talk_sync_local_lan_if_needed();
 }
