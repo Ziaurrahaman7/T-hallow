@@ -23,8 +23,18 @@ function talk_lan_base_read_file(): ?string
     return $base !== '' ? rtrim($base, '/') : null;
 }
 
+function talk_is_production_host(?string $host = null): bool
+{
+    $host ??= talk_http_host_name();
+
+    return $host === 'hallow.mmgbd.com' || $host === 'www.hallow.mmgbd.com';
+}
+
 function talk_lan_base(): ?string
 {
+    if (talk_is_production_host()) {
+        return null;
+    }
     if (PHP_SAPI !== 'cli' && ! empty($_SERVER['REQUEST_METHOD']) && talk_is_local_dev_host()) {
         $live = talk_lan_base_for_boards(talk_lan_base_read_file(), false);
         if ($live !== null) {
@@ -88,13 +98,18 @@ function talk_servers_file(): string
  */
 function talk_servers_default_uploads(): array
 {
+    $live = rtrim(talk_live_upload_url(), '/');
     if (talk_lan_base() !== null) {
-        return [talk_device_upload_url()];
+        $local = rtrim(talk_device_upload_url(), '/');
+        if ($local === $live) {
+            return [$live];
+        }
+
+        return [$local, $live];
     }
-    $self = talk_config()['upload_url'];
-    $live = talk_live_upload_url();
-    if (rtrim($self, '/') === rtrim($live, '/')) {
-        return [$self];
+    $self = rtrim((string) talk_config()['upload_url'], '/');
+    if ($self === '' || $self === $live) {
+        return [$live];
     }
 
     return [$self, $live];
@@ -165,29 +180,59 @@ function talk_servers_save(array $uploads): void
 /**
  * @return list<string>
  */
+function talk_production_upload_url(): string
+{
+    $self = rtrim((string) talk_config()['upload_url'], '/');
+    if ($self !== '' && talk_is_production_host()) {
+        return $self;
+    }
+
+    return rtrim(talk_live_upload_url(), '/');
+}
+
+function talk_merge_upload_urls(array $primary, array $extra): array
+{
+    $live = rtrim(talk_live_upload_url(), '/');
+    $out = [];
+    foreach (array_merge($primary, $extra) as $url) {
+        $url = rtrim((string) $url, '/');
+        if ($url === '' || strlen($url) > 220) {
+            continue;
+        }
+        if (! preg_match('#^https?://#i', $url)) {
+            continue;
+        }
+        if (in_array($url, $out, true)) {
+            continue;
+        }
+        $out[] = $url;
+        if (count($out) >= 2) {
+            break;
+        }
+    }
+    if (! in_array($live, $out, true) && count($out) < 2) {
+        $out[] = $live;
+    }
+
+    return array_slice($out, 0, 2);
+}
+
 function talk_upload_urls(): array
 {
+    if (PHP_SAPI !== 'cli' && talk_is_production_host()) {
+        return [rtrim(talk_production_upload_url(), '/')];
+    }
     $uploads = talk_servers_read()['uploads'];
     if (PHP_SAPI !== 'cli' && ! empty($_SERVER['REQUEST_METHOD']) && talk_is_local_dev_host()) {
         $lan = talk_lan_base();
         if ($lan !== null) {
             $primary = rtrim($lan, '/').'/api/upload.php';
-            $out = [$primary];
-            foreach ($uploads as $url) {
-                $url = rtrim((string) $url, '/');
-                if ($url === '' || $url === rtrim($primary, '/')) {
-                    continue;
-                }
-                if (str_contains($url, 'hallow.mmgbd.com') && count($out) < 2) {
-                    $out[] = $url;
-                }
-            }
 
-            return $out;
+            return talk_merge_upload_urls([$primary], $uploads);
         }
     }
 
-    return $uploads;
+    return talk_merge_upload_urls($uploads, []);
 }
 
 function talk_local_json_file(): string
@@ -454,10 +499,11 @@ function talk_net_header_wifi_defaults(): array
 function talk_write_net_config_local_h(string $lanBase, string $ssid, string $pass): void
 {
     $upload = rtrim($lanBase, '/').'/api/upload.php';
+    $alt = rtrim(talk_live_upload_url(), '/');
     $body = "#pragma once\n"
         ."// Auto dashboard sync ".date('c')." — re-flash AP/STA after IP/path change.\n"
         .'#define NET_URL '.talk_c_quote($upload)."\n"
-        ."#define NET_URL_ALT \"\"\n"
+        .'#define NET_URL_ALT '.talk_c_quote($alt)."\n"
         .'#define NET_SSID '.talk_c_quote($ssid)."\n"
         .'#define NET_PASS '.talk_c_quote($pass)."\n";
     $file = talk_net_config_local_h();
@@ -515,17 +561,8 @@ function talk_sync_local_lan_if_needed(): void
         $changed = true;
     }
 
-    $wantUploads = [$upload];
+    $wantUploads = talk_merge_upload_urls([$upload], [talk_live_upload_url()]);
     $existing = talk_servers_read()['uploads'];
-    foreach ($existing as $u) {
-        $u = rtrim((string) $u, '/');
-        if ($u === '' || $u === rtrim($upload, '/')) {
-            continue;
-        }
-        if (str_contains($u, 'hallow.mmgbd.com') && count($wantUploads) < 2) {
-            $wantUploads[] = $u;
-        }
-    }
     $norm = static fn (array $list): array => array_map(
         static fn ($u) => rtrim((string) $u, '/'),
         $list
@@ -1158,6 +1195,29 @@ function talk_require_web(): void
     exit;
 }
 
+/** Live সাইটে local.json/servers.json ভুল LAN URL থাকলে HTTPS upload ঠিক করে। */
+function talk_sync_production_uploads_if_needed(): void
+{
+    static $ran = false;
+    if ($ran || PHP_SAPI === 'cli' || ! talk_is_production_host()) {
+        return;
+    }
+    $ran = true;
+  if (empty($_SERVER['REQUEST_METHOD'])) {
+      return;
+  }
+    $want = [talk_production_upload_url()];
+    $existing = talk_servers_read()['uploads'];
+    $norm = static fn (array $a): array => array_map(
+        static fn ($u) => rtrim((string) $u, '/'),
+        $a
+    );
+    if ($norm($existing) === $norm($want)) {
+        return;
+    }
+    talk_servers_save($want);
+}
+
 function talk_should_auto_sync_local(): bool
 {
     $sn = (string) ($_SERVER['SCRIPT_NAME'] ?? '');
@@ -1172,6 +1232,9 @@ function talk_should_auto_sync_local(): bool
     return false;
 }
 
-if (PHP_SAPI !== 'cli' && talk_should_auto_sync_local()) {
-    talk_sync_local_lan_if_needed();
+if (PHP_SAPI !== 'cli') {
+    talk_sync_production_uploads_if_needed();
+    if (talk_should_auto_sync_local()) {
+        talk_sync_local_lan_if_needed();
+    }
 }

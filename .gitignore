@@ -1,3 +1,5 @@
+data/local.json
+data/lan_ip_cache.json
 data/index.json
 data/wav/
 data/wifi.json

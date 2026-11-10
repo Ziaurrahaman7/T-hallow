@@ -12,6 +12,7 @@ if (-not $ip) {
 }
 $root = Split-Path $PSScriptRoot -Parent
 $base = "http://$ip/T-hallow"
+$live = "https://hallow.mmgbd.com/api/upload.php"
 $localJson = Join-Path $root "data\local.json"
 $netLocal = Join-Path $root "shared\net_config.local.h"
 
@@ -31,12 +32,12 @@ if (Test-Path $netLocal) {
 #pragma once
 // Laragon: PC + board same Wi-Fi. IP বদলালে এই স্ক্রিপ্ট চালান, তারপর AP/STA flash।
 #define NET_URL "$base/api/upload.php"
-#define NET_URL_ALT ""
+#define NET_URL_ALT "$live"
 #define NET_SSID "$ssid"
 #define NET_PASS "$pass"
 "@ | Set-Content -Path $netLocal -Encoding UTF8
 @{
-  uploads = @("$base/api/upload.php")
+  uploads = @("$base/api/upload.php", $live)
 } | ConvertTo-Json | Set-Content -Path (Join-Path $root "data\servers.json") -Encoding UTF8
 Write-Host "Local base: $base"
 Write-Host "Wi-Fi default in flash: $ssid"
