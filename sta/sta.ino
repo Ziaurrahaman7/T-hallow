@@ -145,6 +145,12 @@ static void micTask(void *) {
       delay(20);
       continue;
     }
+#if PTT_HALF_DUPLEX
+    if (spkOn && !pttPressed()) {
+      delay(4);
+      continue;
+    }
+#endif
     size_t nbytes = 0;
     i2s_channel_read(micIn, raw, sizeof(raw), &nbytes, portMAX_DELAY);
     int n = (int)(nbytes / sizeof(int32_t));
@@ -369,7 +375,23 @@ static void speakerClose() {
 }
 
 static void speakerIdle() {
-  if (spkOn && phraseMs != 0 && (uint32_t)(millis() - phraseMs) > 900) speakerClose();
+  if (spkOn && phraseMs != 0 && (uint32_t)(millis() - phraseMs) > 1300) speakerClose();
+}
+
+static void playEnhanceSta(int16_t* pcm, int n) {
+  static int16_t hpPrev = 0;
+  static int32_t dc = 0;
+  for (int i = 0; i < n; i++) {
+    int32_t x = pcm[i];
+    dc += (x - dc) >> 8;
+    x -= dc;
+    int32_t d = x - hpPrev;
+    hpPrev = (int16_t)x;
+    x += d >> 1;
+    if (x > 32767) x = 32767;
+    if (x < -32768) x = -32768;
+    pcm[i] = (int16_t)x;
+  }
 }
 
 void playPacket(uint8_t* p) {
@@ -377,32 +399,41 @@ void playPacket(uint8_t* p) {
 
   static uint8_t lastPkt[SAMPLES];
   static bool haveLast = false;
-  if (haveLast && memcmp(lastPkt, p, SAMPLES) == 0) return;
+  static uint32_t lastPktMs = 0;
+  uint32_t nowPlay = millis();
+  if (haveLast && memcmp(lastPkt, p, SAMPLES) == 0 && (nowPlay - lastPktMs) < 70) return;
   memcpy(lastPkt, p, SAMPLES);
   haveLast = true;
+  lastPktMs = nowPlay;
 
   int16_t pcm[PCM_N];
   if (!adpcmUnpack(p, pcm)) return;
+  playEnhanceSta(pcm, PCM_N);
 
   int peak = 0;
   int strong = 0;
   for (int i = 0; i < PCM_N; i++) {
     int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
     if (a > peak) peak = a;
-    if (a >= 400) strong++;
+    if (a >= 350) strong++;
   }
-  if (peak < 360 || strong < 6) return;
+  if (peak < 280 || strong < 4) return;
 
   rxCount++;
-  bool start = peak >= 650 && strong >= 8;
+  bool start = peak >= 520 && strong >= 6;
   if (start) phraseMs = millis();
-  bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 900;
+  bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 1300;
   if (!phrase) return;
   speakerOpen();
   if (!spkOn) return;
   if (!wasTalk) {
-    for (int i = 0; i < 24 && i < PCM_N; i++) {
-      pcm[i] = (int16_t)((int32_t)pcm[i] * i / 24);
+    for (int i = 0; i < 10 && i < PCM_N; i++) {
+      pcm[i] = (int16_t)((int32_t)pcm[i] * i / 10);
+    }
+  } else {
+    for (int i = 0; i < 6 && i < PCM_N; i++) {
+      int32_t blend = ((int32_t)lastOut * (6 - i) + (int32_t)pcm[i] * (i + 1)) / 6;
+      pcm[i] = (int16_t)blend;
     }
   }
   wasTalk = true;
@@ -415,7 +446,7 @@ void playPacket(uint8_t* p) {
   }
   lastOut = playSample(pcm[PCM_N - 1]);
   size_t w = 0;
-  i2s_channel_write(spk, stereo, sizeof(stereo), &w, 80);
+  i2s_channel_write(spk, stereo, sizeof(stereo), &w, 120);
   playCount++;
 }
 
@@ -448,7 +479,7 @@ static void flushReceiveAudio() {
 }
 
 static void playQueued() {
-  for (int drain = 0; rxqN > 0 && drain < 2; drain++) {
+  for (int drain = 0; rxqN > 0 && drain < 8; drain++) {
     uint8_t tmp[SAMPLES];
     memcpy(tmp, rxq[0], SAMPLES);
     if (rxqN > 1) memmove(rxq[0], rxq[1], (size_t)(rxqN - 1) * SAMPLES);
@@ -513,6 +544,7 @@ static bool sendPacket(const uint8_t *audio) {
 void setup() {
   monBegin();
   pttBegin();
+  playGainNum = 11;
   delay(400);
   monPrint("sta boot\n");
   SerialAH.setRxBufferSize(4096);
@@ -521,6 +553,8 @@ void setup() {
 
   i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
   chan.auto_clear = true;
+  chan.dma_desc_num = 10;
+  chan.dma_frame_num = 512;
   esp_err_t okChan = i2s_new_channel(&chan, &spk, NULL);
   i2s_std_config_t cfg = {
     .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(8000),

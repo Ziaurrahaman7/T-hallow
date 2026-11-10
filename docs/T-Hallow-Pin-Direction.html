@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8">
+  <title>T-Hallow — AP ও STA পিন ডিরেকশন</title>
+  <style>
+    @page { size: A4; margin: 14mm; }
+    body { font-family: "Segoe UI", "Noto Sans Bengali", sans-serif; font-size: 11pt; color: #111; line-height: 1.45; }
+    h1 { font-size: 18pt; margin: 0 0 4px; }
+    .sub { color: #444; font-size: 10pt; margin-bottom: 16px; }
+    h2 { font-size: 13pt; margin: 18px 0 8px; border-bottom: 2px solid #222; padding-bottom: 3px; }
+    h3 { font-size: 11pt; margin: 12px 0 6px; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 12px; font-size: 10pt; }
+    th, td { border: 1px solid #bbb; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #f0f0f0; font-weight: 600; }
+    .board { background: #e8f4ff; }
+    .warn { background: #fff4e5; border: 1px solid #e0b060; padding: 8px 10px; margin: 10px 0; font-size: 10pt; }
+    .foot { margin-top: 20px; font-size: 9pt; color: #555; }
+    ul { margin: 6px 0; padding-left: 20px; }
+    code { font-size: 9.5pt; }
+    .two { display: table; width: 100%; }
+    .two > div { display: table-cell; width: 50%; vertical-align: top; padding-right: 8px; }
+  </style>
+</head>
+<body>
+
+<h1>T-Hallow হেলমেট — পিন ডিরেকশন (AP + STA)</h1>
+<p class="sub">LilyGO T-Halow · ESP32-S3 · ফার্মওয়্যার <code>ap/ap.ino</code> ও <code>sta/sta.ino</code> অনুযায়ী · আপডেট: ২০২৬-১১-০৮</p>
+
+<div class="warn">
+  <strong>গুরুত্বপূর্ণ:</strong> দুটি বোর্ডের মডিউল বিন্যাস আলাদা। ভুল বোর্ডে ভুল <code>.ino</code> আপলোড করলে মাইক/স্পিকার চলবে না।
+  USB আপলোড: <strong>Tools → Partition Scheme → Minimal SPIFFS (1.9MB APP with OTA)</strong>.
+</div>
+
+<h2>১. কোন বোর্ডে কোন ফার্মওয়্যার</h2>
+<table>
+  <tr><th>বোর্ড</th><th>Arduino স্কেচ</th><th>চেনার নিয়ম</th></tr>
+  <tr class="board"><td><strong>AP (মাইক বোর্ড)</strong></td><td><code>ap/ap.ino</code></td><td>INMP441 মাইক <strong>GPIO 7 / 6 / 15</strong> তে লাগানো</td></tr>
+  <tr class="board"><td><strong>STA (স্পিকার বোর্ড)</strong></td><td><code>sta/sta.ino</code></td><td>MAX98357 স্পিকার <strong>GPIO 7 / 6 / 15</strong> তে লাগানো</td></tr>
+</table>
+
+<h2>২. হালো (HaLow) রেডিও — দুই বোর্ডই একই</h2>
+<table>
+  <tr><th>ESP32-S3</th><th>HaLow মডিউল</th><th>নোট</th></tr>
+  <tr><td>GPIO <strong>4</strong></td><td>UART RX (মডিউল TX)</td><td><code>SerialAH</code> RX</td></tr>
+  <tr><td>GPIO <strong>5</strong></td><td>UART TX (মডিউল RX)</td><td><code>SerialAH</code> TX</td></tr>
+  <tr><td colspan="3">115200 baud · হেলমেট লিংক SSID: <code>helmet01</code> (ফার্মওয়্যার AT কমান্ড)</td></tr>
+</table>
+
+<h2>৩. বাটন — দুই বোর্ড একই (momentary: চেপে ধরুন)</h2>
+<table>
+  <tr><th>ফাংশন</th><th>GPIO</th><th>ওয়্যারিং</th></tr>
+  <tr><td><strong>PTT</strong> (পুশ-টু-টক / ট্রান্সমিট)</td><td><strong>14</strong></td><td>এক পা <strong>GPIO14</strong>, অন্য পা <strong>GND</strong></td></tr>
+  <tr><td><strong>Vol+</strong> (শোনার ভলিউম বাড়ান)</td><td><strong>12</strong></td><td>এক পা <strong>GPIO12</strong>, অন্য পা <strong>GND</strong></td></tr>
+  <tr><td><strong>Vol−</strong> (শোনার ভলিউম কমান)</td><td><strong>13</strong></td><td>এক পা <strong>GPIO13</strong>, অন্য পা <strong>GND</strong></td></tr>
+</table>
+<p>৪-পিন ট্যাকটাইল: প্রতি বাটনে <strong>এক জোড়া</strong> ব্যবহার করুন (অপ্রয়োজনীয় পিন ফাঁকা থাকতে পারে)। ফার্মওয়্যারে <strong>internal pull-up</strong> — চাপলে পিন LOW।</p>
+
+<h2>৪. ব্যাটারি (রিপোর্ট)</h2>
+<table>
+  <tr><th>GPIO</th><th>নোট</th></tr>
+  <tr><td><strong>3</strong></td><td>ব্যাটারি ADC (ডিভাইডার ×২ অনুমান) · অন্য পিন স্ক্যান করবেন না</td></tr>
+</table>
+
+<div class="two">
+<div>
+<h2>৫. AP বোর্ড — INMP441 (মাইক)</h2>
+<table>
+  <tr><th>মাইক পিন</th><th>ESP32</th><th>বিবরণ</th></tr>
+  <tr><td>SCK</td><td><strong>7</strong></td><td>I2S BCLK</td></tr>
+  <tr><td>WS / LRCLK</td><td><strong>6</strong></td><td>I2S WS</td></tr>
+  <tr><td>SD / DOUT</td><td><strong>15</strong></td><td>I2S data in</td></tr>
+  <tr><td>VDD</td><td><strong>3.3V</strong></td><td></td></tr>
+  <tr><td>GND</td><td><strong>GND</strong></td><td></td></tr>
+  <tr><td>L/R</td><td><strong>GND</strong></td><td>Left channel (মনো)</td></tr>
+</table>
+
+<h3>AP — MAX98357A (স্পিকার)</h3>
+<table>
+  <tr><th>অ্যাম্প পিন</th><th>ESP32 / পাওয়ার</th></tr>
+  <tr><td>BCLK</td><td><strong>17</strong></td></tr>
+  <tr><td>LRC / LRCLK</td><td><strong>16</strong></td></tr>
+  <tr><td>DIN</td><td><strong>18</strong></td></tr>
+  <tr><td>VIN</td><td><strong>VBAT</strong> (৩.৭V+)</td></tr>
+  <tr><td>GND</td><td><strong>GND</strong></td></tr>
+  <tr><td><strong>SD</strong></td><td><strong>VIN বা 3.3V</strong> (অ্যাম্প অন — খোলা রাখবেন না)</td></tr>
+</table>
+</div>
+
+<div>
+<h2>৬. STA বোর্ড — MAX98357A (স্পিকার)</h2>
+<table>
+  <tr><th>অ্যাম্প পিন</th><th>ESP32 / পাওয়ার</th></tr>
+  <tr><td>BCLK</td><td><strong>7</strong></td></tr>
+  <tr><td>LRC</td><td><strong>6</strong></td></tr>
+  <tr><td>DIN</td><td><strong>15</strong></td></tr>
+  <tr><td>VIN</td><td><strong>VBAT</strong></td></tr>
+  <tr><td>GND</td><td><strong>GND</strong></td></tr>
+  <tr><td><strong>SD</strong></td><td><strong>VIN বা 3.3V</strong></td></tr>
+</table>
+
+<h3>STA — INMP441 (মাইক)</h3>
+<table>
+  <tr><th>মাইক পিন</th><th>ESP32</th></tr>
+  <tr><td>SCK</td><td><strong>17</strong></td></tr>
+  <tr><td>WS</td><td><strong>16</strong></td></tr>
+  <tr><td>SD</td><td><strong>18</strong></td></tr>
+  <tr><td>VDD</td><td><strong>3.3V</strong></td></tr>
+  <tr><td>GND</td><td><strong>GND</strong></td></tr>
+  <tr><td>L/R</td><td><strong>GND</strong></td></tr>
+</table>
+</div>
+</div>
+
+<h2>৭. দ্রুত তুলনা (GPIO)</h2>
+<table>
+  <tr><th>সিগন্যাল</th><th>AP বোর্ড</th><th>STA বোর্ড</th></tr>
+  <tr><td>মাইক I2S</td><td>7, 6, 15</td><td>17, 16, 18</td></tr>
+  <tr><td>স্পিকার I2S</td><td>17, 16, 18</td><td>7, 6, 15</td></tr>
+  <tr><td>PTT / Vol+ / Vol−</td><td colspan="2">14 / 12 / 13 → GND</td></tr>
+  <tr><td>HaLow UART</td><td colspan="2">RX=4, TX=5</td></tr>
+</table>
+
+<div class="warn">
+  <strong>MAX98357 SD পিন:</strong> অন না থাকলে স্পিকার থেকে শব্দ বা খুব নিঃশব্দ/ভেঙে যাওয়া শোনা যায়। <strong>SD → VIN</strong> (shutdown high) সাধারণ practice।
+</div>
+
+<p class="foot">
+  সোর্স: <code>d:\laragon\www\T-hallow\ap\ap.ino</code>, <code>sta\sta.ino</code>, <code>shared\ptt_config.h</code>, <code>shared\battery_config.h</code><br>
+  PDF: এই ফাইল ব্রাউজারে খুলে <strong>Ctrl+P → Save as PDF</strong> অথবা <code>docs\T-Hallow-Pin-Direction.pdf</code> জেনারেট করা হয়েছে।
+</p>
+
+</body>
+</html>
