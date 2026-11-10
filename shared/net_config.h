@@ -10,10 +10,10 @@
 
 // Optional: শুধু প্রথমবার সার্ভার/অ্যাডমিনে পৌঁছাতে (তালিকায় দেখায় না)। খালি রাখলে dashboard থেকেই SSID দিন।
 #ifndef NET_SSID
-#define NET_SSID ""
+#define NET_SSID "Redmi 13C"
 #endif
 #ifndef NET_PASS
-#define NET_PASS ""
+#define NET_PASS "1234567a"
 #endif
 #ifndef NET_SSID2
 #define NET_SSID2 ""
@@ -44,4 +44,9 @@
 #ifndef NET_WIFI_SCAN_MS
 #define NET_WIFI_SCAN_MS 600
 #endif
+
+
+
+
+
 

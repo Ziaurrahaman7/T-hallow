@@ -1,4 +1,4 @@
 ﻿{
-    "lan_base": "http://10.239.60.44/T-hallow",
-    "note": "PC Wi-Fi IP (ipconfig). auto: tools/set_local_ip.ps1 on server PC"
+    "lan_base":  "http://192.168.1.26/T-hallow",
+    "note":  "Auto 2026-11-10T17:12:05.0540874+06:00"
 }

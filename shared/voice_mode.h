@@ -1,8 +1,9 @@
 #pragma once
 
 // 1 = শুধু মাইক → HaLow → স্পিকার (Wi-Fi/PTT/dashboard বন্ধ)। Production এ 0 করুন।
+// 0 = Wi-Fi + ড্যাশবোর্ড | 1 = শুধু HaLow ভয়েস টেস্ট
 #ifndef VOICE_SIMPLE
-#define VOICE_SIMPLE 1
+#define VOICE_SIMPLE 0
 #endif
 
 #if VOICE_SIMPLE

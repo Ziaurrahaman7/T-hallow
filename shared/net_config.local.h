@@ -1,6 +1,6 @@
 ﻿#pragma once
-// Laragon/সার্ভার: IP বদলালে tools/set_local_ip.ps1 চালান (সেই PC-তে যার IP বোর্ড দেখবে)
-#define NET_URL "http://10.239.60.44/T-hallow/api/upload.php"
+// Laragon: PC + board same Wi-Fi. IP à¦¬à¦¦à¦²à¦¾à¦²à§‡ à¦à¦‡ à¦¸à§à¦•à§à¦°à¦¿à¦ªà§à¦Ÿ à¦šà¦¾à¦²à¦¾à¦¨, à¦¤à¦¾à¦°à¦ªà¦° AP/STA flashà¥¤
+#define NET_URL "http://192.168.1.26/T-hallow/api/upload.php"
 #define NET_URL_ALT ""
-#define NET_SSID "Redmi 13C"
-#define NET_PASS "1234567a"
+#define NET_SSID "Primacy02"
+#define NET_PASS "@primacy 2020"
