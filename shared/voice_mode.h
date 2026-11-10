@@ -66,6 +66,47 @@
 
 #endif
 
+// অটো VAD: ছোট শব্দ কাটা — শুধু জোর/টেকা কথা TX।
+#ifndef VOICE_AUTO_SAMPLE_MIN
+#define VOICE_AUTO_SAMPLE_MIN 500
+#endif
+#ifndef VOICE_AUTO_STRONG_MIN
+#define VOICE_AUTO_STRONG_MIN 12
+#endif
+#ifndef VOICE_AUTO_SHAPED_PEAK
+#define VOICE_AUTO_SHAPED_PEAK 960
+#endif
+#ifndef VOICE_AUTO_TX_PEAK
+#define VOICE_AUTO_TX_PEAK 520
+#endif
+#ifndef VOICE_AUTO_TX_STRONG
+#define VOICE_AUTO_TX_STRONG 10
+#endif
+#ifndef VOICE_AUTO_LOUD_MIN
+#define VOICE_AUTO_LOUD_MIN 540
+#endif
+#ifndef VOICE_AUTO_LOUD_CNT
+#define VOICE_AUTO_LOUD_CNT 5
+#endif
+#ifndef VOICE_PLAY_RX_PEAK_MIN
+#define VOICE_PLAY_RX_PEAK_MIN 40
+#endif
+#ifndef VOICE_PLAY_BOOST_BELOW
+#define VOICE_PLAY_BOOST_BELOW 380
+#endif
+#ifndef VOICE_PLAY_BOOST_NUM
+#define VOICE_PLAY_BOOST_NUM 16
+#endif
+#ifndef VOICE_PLAY_BOOST_DEN
+#define VOICE_PLAY_BOOST_DEN 10
+#endif
+#ifndef VOICE_NET_TX_PEAK
+#define VOICE_NET_TX_PEAK 880
+#endif
+#ifndef VOICE_NET_LOUD_MIN
+#define VOICE_NET_LOUD_MIN 7
+#endif
+
 #ifndef VOICE_PLAY_PEAK_MIN
 #define VOICE_PLAY_PEAK_MIN 8
 #endif

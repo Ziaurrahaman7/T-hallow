@@ -21,7 +21,7 @@
 #endif
 
 #ifndef PLAY_GAIN_NUM
-#define PLAY_GAIN_NUM 10
+#define PLAY_GAIN_NUM 14
 #endif
 #ifndef PLAY_GAIN_DEN
 #define PLAY_GAIN_DEN 8
@@ -113,11 +113,12 @@ static inline bool pttShouldSend(int peak, int nStrong, bool shaped, uint32_t vo
   if (voicedMs != 0 && (nowMs - voicedMs) < 700 && peak >= 280 && nStrong >= 4) return true;
   return false;
 #else
-  (void)voicedMs;
   (void)nowMs;
 #if VOICE_TEST_AUTO
-  if (shaped && peak >= 400 && nStrong >= 6) return true;
-  if (voicedMs != 0 && (nowMs - voicedMs) < 900 && peak >= 320 && nStrong >= 5) return true;
+  (void)voicedMs;
+  if (!shaped && peak < VOICE_AUTO_TX_PEAK) return false;
+  if (shaped && peak >= VOICE_AUTO_SHAPED_PEAK && nStrong >= VOICE_AUTO_STRONG_MIN) return true;
+  if (peak >= (VOICE_AUTO_TX_PEAK + 80) && nStrong >= (VOICE_AUTO_TX_STRONG + 2)) return true;
   return false;
 #else
   (void)nStrong;

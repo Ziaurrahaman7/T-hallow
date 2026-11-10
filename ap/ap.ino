@@ -422,7 +422,15 @@ static void playPacket(uint8_t* p) {
     if (a >= 400) strong++;
   }
 #if VOICE_SIMPLE || VOICE_PLAY_CLEAR
-  if (peak < 35) return;
+  if (peak < VOICE_PLAY_RX_PEAK_MIN) return;
+  if (peak < VOICE_PLAY_BOOST_BELOW) {
+    for (int i = 0; i < PCM_N; i++) {
+      int32_t v = ((int32_t)pcm[i] * VOICE_PLAY_BOOST_NUM) / VOICE_PLAY_BOOST_DEN;
+      if (v > 32767) v = 32767;
+      if (v < -32768) v = -32768;
+      pcm[i] = (int16_t)v;
+    }
+  }
   rxCount++;
   phraseMs = millis();
   speakerOpen();
@@ -706,7 +714,7 @@ void loop() {
     for (int i = 0; i < PCM_N; i++) {
       int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
       if (a > peak) peak = a;
-      if (a >= 400) nStrong++;
+      if (a >= VOICE_AUTO_SAMPLE_MIN) nStrong++;
     }
     static uint32_t voicedMs = 0;
     static int lastPeak = 0;
@@ -714,12 +722,13 @@ void loop() {
     int nLoud = 0;
     for (int i = 0; i < PCM_N; i++) {
       int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
-      if (a >= 500) nLoud++;
+      if (a >= VOICE_AUTO_LOUD_MIN) nLoud++;
     }
-    bool shaped = peak >= 800 && nStrong >= 8;
+    bool shaped = peak >= VOICE_AUTO_SHAPED_PEAK && nStrong >= VOICE_AUTO_STRONG_MIN;
     if (shaped) voicedMs = millis();
     uint32_t nowMs = millis();
-    bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs);
+    bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs)
+                     && (shaped || nLoud >= VOICE_AUTO_LOUD_CNT);
     bool echo;
 #if VOICE_SIMPLE
     // স্পিকার থেকে ফিডব্যাক — দুর্বল পিক কাটা; জোরে কথা AP→STA যাবে
@@ -734,7 +743,7 @@ void loop() {
       adpcmPack(pcm, payload);
       if (sendPacket(payload)) {
         txCount++;
-        if (shaped && peak >= 750 && nLoud >= 5) netNote(payload, PAYLOAD);
+        if (shaped && peak >= VOICE_NET_TX_PEAK && nLoud >= VOICE_NET_LOUD_MIN) netNote(payload, PAYLOAD);
         lastSend = millis();
         if (peak > lastPeak) lastPeak = peak;
         else lastPeak = (lastPeak * 3 + peak) / 4;
