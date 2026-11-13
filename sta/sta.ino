@@ -626,6 +626,7 @@ void setup() {
 }
 
 void loop() {
+  volButtonsPoll();
   netPoll();
   pumpUart();
   halowPollPeerRssi(SerialAH, feedByte, !pttPressed() && !spkOn && rxqN == 0 && !wasTalk);
@@ -662,15 +663,21 @@ void loop() {
       bool shaped = peak >= VOICE_AUTO_SHAPED_PEAK && nStrong >= VOICE_AUTO_STRONG_MIN;
       if (shaped) voicedMs = millis();
       uint32_t nowMs = millis();
-      bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs)
-                       && (shaped || nLoud >= VOICE_AUTO_LOUD_CNT);
+      bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs);
+#if !PTT_REQUIRED
+      sendVoice = sendVoice && (shaped || nLoud >= VOICE_AUTO_LOUD_CNT);
+#endif
       bool echo;
 #if VOICE_SIMPLE
       echo = spkOn && peak < 220;
 #else
-      bool remotePlay = spkOn || wasTalk;
-      echo = (wasTalk && peak < 250 && (nowMs - lastSend) < 150)
-             || (PTT_HALF_DUPLEX && remotePlay);
+      if (pttPressed()) {
+        echo = false;
+      } else {
+        bool remotePlay = spkOn || wasTalk;
+        echo = (wasTalk && peak < 250 && (nowMs - lastSend) < 150)
+               || (PTT_HALF_DUPLEX && remotePlay);
+      }
 #endif
       uint32_t sinceRx = millis() - lastAirRxMs;
       bool deferTx = (rxqN > 0 || sinceRx < 140) && peak < 550;

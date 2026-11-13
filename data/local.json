@@ -1,5 +1,5 @@
 {
-    "lan_base": "http:\/\/10.63.77.179\/T-hallow",
-    "browser": "http:\/\/10.63.77.179\/T-hallow",
-    "note": "Auto sync 2026-11-10T12:36:32+00:00"
+    "lan_base": "http://192.168.1.9/T-hallow",
+    "browser": "http://127.0.0.1/T-hallow",
+    "note": "Auto 2026-11-13 — Laragon local; boards use lan_base (PC IP)"
 }

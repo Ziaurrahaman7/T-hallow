@@ -12,12 +12,12 @@
 
 // 1 = HaLow TX only while button held; 0 = auto VAD (গুঞ্জনে TX কাটতে পারে — শুধু টেস্ট).
 #ifndef PTT_REQUIRED
-#define PTT_REQUIRED 0
+#define PTT_REQUIRED 1
 #endif
 
-// Walkie-style: needs PTT_REQUIRED 1. Auto test: 0 so speaker always plays incoming voice.
+// Walkie-style: needs PTT_REQUIRED 1.
 #ifndef PTT_HALF_DUPLEX
-#define PTT_HALF_DUPLEX 0
+#define PTT_HALF_DUPLEX 1
 #endif
 
 #ifndef PLAY_GAIN_NUM
@@ -107,6 +107,7 @@ static inline bool pttShouldSend(int peak, int nStrong, bool shaped, uint32_t vo
 #elif PTT_REQUIRED
   if (!pttPressed()) return false;
   if (shaped) return true;
+  if (peak >= 320 && nStrong >= 3) return true;
   if (peak >= 400 && nStrong >= 5) return true;
   if (voicedMs != 0 && (nowMs - voicedMs) < 700 && peak >= 280 && nStrong >= 4) return true;
   return false;

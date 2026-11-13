@@ -728,16 +728,21 @@ void loop() {
     bool shaped = peak >= VOICE_AUTO_SHAPED_PEAK && nStrong >= VOICE_AUTO_STRONG_MIN;
     if (shaped) voicedMs = millis();
     uint32_t nowMs = millis();
-    bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs)
-                     && (shaped || nLoud >= VOICE_AUTO_LOUD_CNT);
+    bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs);
+#if !PTT_REQUIRED
+    sendVoice = sendVoice && (shaped || nLoud >= VOICE_AUTO_LOUD_CNT);
+#endif
     bool echo;
 #if VOICE_SIMPLE
-    // স্পিকার থেকে ফিডব্যাক — দুর্বল পিক কাটা; জোরে কথা AP→STA যাবে
     echo = spkOn && peak < 220;
 #else
-    bool remotePlay = spkOn || wasTalk;
-    echo = (wasTalk && peak < 250 && (nowMs - lastSend) < 150)
-           || (PTT_HALF_DUPLEX && remotePlay);
+    if (pttPressed()) {
+      echo = false;
+    } else {
+      bool remotePlay = spkOn || wasTalk;
+      echo = (wasTalk && peak < 250 && (nowMs - lastSend) < 150)
+             || (PTT_HALF_DUPLEX && remotePlay);
+    }
 #endif
     if (sendVoice && !echo) {
       uint8_t payload[PAYLOAD];
