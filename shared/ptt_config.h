@@ -3,24 +3,25 @@
 #ifndef PTT_CONFIG_H
 #define PTT_CONFIG_H
 
+#include "voice_mode.h"
 #include <Arduino.h>
 
 #ifndef PTT_GPIO
 #define PTT_GPIO 14
 #endif
 
-// 1 = HaLow TX only while button held; 0 = legacy auto VAD (no button).
+// 1 = HaLow TX only while button held; 0 = auto VAD (গুঞ্জনে TX কাটতে পারে — শুধু টেস্ট).
 #ifndef PTT_REQUIRED
-#define PTT_REQUIRED 1
+#define PTT_REQUIRED 0
 #endif
 
-// Walkie-style: no speaker while you transmit; no mic TX while remote plays (reduces echo).
+// Walkie-style: needs PTT_REQUIRED 1. Auto test: 0 so speaker always plays incoming voice.
 #ifndef PTT_HALF_DUPLEX
-#define PTT_HALF_DUPLEX 1
+#define PTT_HALF_DUPLEX 0
 #endif
 
 #ifndef PLAY_GAIN_NUM
-#define PLAY_GAIN_NUM 10
+#define PLAY_GAIN_NUM 14
 #endif
 #ifndef PLAY_GAIN_DEN
 #define PLAY_GAIN_DEN 8
@@ -35,6 +36,15 @@
 #endif
 #ifndef VOL_BUTTONS
 #define VOL_BUTTONS 1
+#endif
+
+// Auto TX + soft playback gates (less sa-sa / noise). Production PTT: set 0.
+#ifndef VOICE_TEST_AUTO
+#define VOICE_TEST_AUTO 1
+#endif
+
+#ifndef VOICE_PLAY_CLEAR
+#define VOICE_PLAY_CLEAR 1
 #endif
 
 static uint8_t playGainNum = PLAY_GAIN_NUM;
@@ -73,26 +83,45 @@ static inline void volButtonsPoll() {
 static inline void volButtonsPoll() {}
 #endif
 
-static inline bool pttPressed() {
+/** Physical PTT only (ignored when PTT_REQUIRED 0). */
+static inline bool pttPhysicalDown() {
 #if PTT_REQUIRED
   return digitalRead(PTT_GPIO) == LOW;
 #else
-  // No PTT: never treat as “button held” (half-duplex still uses spkOn / VAD).
   return false;
 #endif
 }
 
+/** Serial log: 1 = button pressed. Auto mode always 0. */
+static inline bool pttPressed() {
+  return pttPhysicalDown();
+}
+
 // Mic level (c0/c1) != voice gate. PTT held: reject weak env noise; real speech only.
 static inline bool pttShouldSend(int peak, int nStrong, bool shaped, uint32_t voicedMs, uint32_t nowMs) {
-#if PTT_REQUIRED
+#if VOICE_SIMPLE
+  (void)shaped;
+  (void)voicedMs;
+  (void)nowMs;
+  return peak >= VOICE_TX_PEAK_MIN && nStrong >= VOICE_TX_STRONG_MIN;
+#elif PTT_REQUIRED
   if (!pttPressed()) return false;
   if (shaped) return true;
   if (peak >= 400 && nStrong >= 5) return true;
   if (voicedMs != 0 && (nowMs - voicedMs) < 700 && peak >= 280 && nStrong >= 4) return true;
   return false;
 #else
+  (void)nowMs;
+#if VOICE_TEST_AUTO
+  (void)voicedMs;
+  if (!shaped && peak < VOICE_AUTO_TX_PEAK) return false;
+  if (shaped && peak >= VOICE_AUTO_SHAPED_PEAK && nStrong >= VOICE_AUTO_STRONG_MIN) return true;
+  if (peak >= (VOICE_AUTO_TX_PEAK + 80) && nStrong >= (VOICE_AUTO_TX_STRONG + 2)) return true;
+  return false;
+#else
   (void)nStrong;
   return shaped || (voicedMs != 0 && (nowMs - voicedMs) < 900 && peak >= 300);
+#endif
 #endif
 }
 

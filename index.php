@@ -41,6 +41,8 @@ $cfg = talk_config();
 $uploadUrls = talk_upload_urls();
 $upload = $uploadUrls[0] ?? $cfg['upload_url'];
 $upload2 = $uploadUrls[1] ?? '';
+$localSyncNote = talk_local_sync_note();
+$lanBase = talk_lan_base();
 talk_dash_head('কথোপকথন', ['talk-index.css']);
 talk_dash_sidebar('talk', (string) $_SESSION['talk_user']);
 talk_dash_main_open('talk-main');
@@ -69,6 +71,11 @@ talk_dash_main_open('talk-main');
       </div>
     </div>
   </header>
+  <?php if ($localSyncNote !== ''): ?>
+  <p class="note" role="status">লোকাল স্বয়ংক্রিয় আপডেট: বোর্ডের ঠিকানা <code><?php echo htmlspecialchars($localSyncNote, ENT_QUOTES, 'UTF-8'); ?></code> (localhost থেকে খুললেও Wi‑Fi বোর্ড PC-র LAN IP ব্যবহার করে)।</p>
+  <?php elseif ($lanBase !== null): ?>
+  <p class="note" role="status">বোর্ড ল্যান: <code><?php echo htmlspecialchars($lanBase, ENT_QUOTES, 'UTF-8'); ?></code> · ব্রাউজার: <code><?php echo htmlspecialchars((string) ($_SERVER['HTTP_HOST'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></code></p>
+  <?php endif; ?>
   <div class="view" id="panelTalk">
     <div class="talk-toolbar">
       <button type="button" id="clearPick" class="btn-icon" disabled aria-label="নির্বাচিত সরান" title="নির্বাচিত সরান">
@@ -139,7 +146,7 @@ talk_dash_main_open('talk-main');
   <div class="view" id="panelWifi" hidden>
     <form id="wifiForm" class="card sheet">
       <h2>সার্ভার ঠিকানা</h2>
-      <p class="lead">কথা আপলোডের URL। বোর্ড Wi‑Fi → <a href="net.php">বোর্ড Wi‑Fi</a>।</p>
+      <p class="lead">কথা আপলোডের URL। <code>localhost</code> / <code>T-hallow.test</code> থেকে খুললে PC-র LAN IP দিয়ে ঠিকানা ও <code>data/local.json</code> নিজে আপডেট হয়। বোর্ড Wi‑Fi → <a href="net.php">বোর্ড Wi‑Fi</a>।</p>
       <label>ড্যাশবোর্ড ১ (কথা পাঠানোর ঠিকানা)
         <input id="uploadUrl" type="url" maxlength="220" required value="<?php echo htmlspecialchars($upload, ENT_QUOTES, 'UTF-8'); ?>">
       </label>

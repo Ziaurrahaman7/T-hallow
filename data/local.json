@@ -1,4 +1,5 @@
 {
-    "lan_base": "http://10.239.60.44/T-hallow",
-    "note": "PC Wi-Fi IP (ipconfig). বোর্ড একই Wi-Fi-তে থাকতে হবে। IP বদলালে tools/set_local_ip.ps1 চালান।"
+    "lan_base": "http:\/\/10.63.77.179\/T-hallow",
+    "browser": "http:\/\/10.63.77.179\/T-hallow",
+    "note": "Auto sync 2026-11-10T12:36:32+00:00"
 }

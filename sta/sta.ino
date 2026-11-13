@@ -2,7 +2,7 @@
 // STA board. Upload to the board whose speaker is on GPIO7/6/15.
 // MAX98357A: BCLK=GPIO7  LRC=GPIO6  DIN=GPIO15  GND=GND  VIN=VBAT
 // INMP441: SCK=GPIO17  WS=GPIO16  SD=GPIO18  VDD=3.3V  GND=GND  L/R=GND
-// PTT: IO14↔GND | Vol+: IO12↔GND | Vol−: IO13↔GND (momentary, 4-pin = use one pair each).
+// PTT: GPIO14 — button other leg to GND (both AP and STA).
 // Talks both ways. Plays AP magic A5 5A A5 5A. Own voice uses A5 5A 5A A5.
 
 #include <Arduino.h>
@@ -16,9 +16,10 @@ static HWCDC MonPort;
 
 #define AH_RX 4
 #define AH_TX 5
-#define I2S_BCLK 7
-#define I2S_LRC  6
-#define I2S_DIN  15
+#include "../shared/sta_speaker_pins.h"
+#define I2S_BCLK STA_I2S_BCLK
+#define I2S_LRC  STA_I2S_LRC
+#define I2S_DIN  STA_I2S_DIN
 #define MIC_SCK 17
 #define MIC_WS  16
 #define MIC_SD  18
@@ -26,7 +27,7 @@ static HWCDC MonPort;
 #define PCM_N 321
 #define PAYLOAD 163
 #define DECIM 2
-#define SHIFT 10
+#define SHIFT 11
 #define RING 2048
 
 static const uint8_t PLAY_MAGIC[4] = {0xA5, 0x5A, 0xA5, 0x5A};
@@ -74,9 +75,12 @@ static void monPrintf(const char* fmt, ...) {
 #include "../shared/netlog.h"
 #include "../shared/ptt_config.h"
 #include "../shared/voice_air.h"
+#include "../shared/speaker_beep.h"
 
 uint32_t rxCount = 0;
 uint32_t lastPrint = 0;
+static uint32_t airPkts = 0;
+static volatile uint32_t lastAirRxMs = 0;
 
 void sendAT(const char* cmd) {
   SerialAH.print(cmd);
@@ -100,6 +104,10 @@ static volatile int rpos = 0;
 static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 static bool wantOk = false;
 static bool okFlag = false;
+
+static VoiceAirRx airRx;
+static uint8_t rxq[20][SAMPLES];
+static int rxqN = 0;
 
 static uint32_t mag32(int32_t s) {
   return (s < 0) ? (uint32_t)(-(int64_t)s) : (uint32_t)s;
@@ -145,22 +153,12 @@ static void micTask(void *) {
       delay(20);
       continue;
     }
-#if PTT_HALF_DUPLEX
-    if (spkOn && !pttPressed()) {
-      delay(4);
-      continue;
-    }
-#endif
     size_t nbytes = 0;
     i2s_channel_read(micIn, raw, sizeof(raw), &nbytes, portMAX_DELAY);
     int n = (int)(nbytes / sizeof(int32_t));
-    uint32_t m0 = 0;
-    uint32_t m1 = 0;
+    uint32_t pkMic = 0;
     for (int i = 0; i + 1 < n; i += 2) {
       uint32_t a0 = mag32(raw[i]);
-      uint32_t a1 = mag32(raw[i + 1]);
-      if (a0 > m0) m0 = a0;
-      if (a1 > m1) m1 = a1;
       bool bad0 = a0 > 0x70000000UL;
       int32_t s = bad0 ? 0 : raw[i];
       sum += s;
@@ -186,16 +184,19 @@ static void micTask(void *) {
       if (v > 32767) v = 32767;
       if (v < -32768) v = -32768;
       int32_t a = v < 0 ? -v : v;
-      if (a > 26000) {
-        int32_t shaped = 26000 + (a - 26000) / 3;
+      if (a > 22000) {
+        int32_t shaped = 22000 + (a - 22000) / 4;
         v = v < 0 ? -shaped : shaped;
       }
       if (v > 32767) v = 32767;
       if (v < -32768) v = -32768;
       pushSample((int16_t)v);
+      int32_t aa = v < 0 ? -v : v;
+      if ((uint32_t)aa > pkMic) pkMic = (uint32_t)aa;
     }
-    micC0 = m0;
-    micC1 = m1;
+    portENTER_CRITICAL(&mux);
+    if (pkMic > micC0) micC0 = pkMic;
+    portEXIT_CRITICAL(&mux);
   }
 }
 
@@ -375,68 +376,86 @@ static void speakerClose() {
 }
 
 static void speakerIdle() {
-  if (spkOn && phraseMs != 0 && (uint32_t)(millis() - phraseMs) > 1300) speakerClose();
-}
-
-static void playEnhanceSta(int16_t* pcm, int n) {
-  static int16_t hpPrev = 0;
-  static int32_t dc = 0;
-  for (int i = 0; i < n; i++) {
-    int32_t x = pcm[i];
-    dc += (x - dc) >> 8;
-    x -= dc;
-    int32_t d = x - hpPrev;
-    hpPrev = (int16_t)x;
-    x += d >> 1;
-    if (x > 32767) x = 32767;
-    if (x < -32768) x = -32768;
-    pcm[i] = (int16_t)x;
+  if (rxqN > 0) {
+    phraseMs = millis();
+    return;
   }
+  uint32_t holdMs = VOICE_PLAY_CLEAR ? 3600u : 900u;
+  if (spkOn && phraseMs != 0 && (uint32_t)(millis() - phraseMs) > holdMs) speakerClose();
 }
 
 void playPacket(uint8_t* p) {
   if (!voiceAirPayloadOk(p)) return;
 
+#if !VOICE_PLAY_CLEAR
   static uint8_t lastPkt[SAMPLES];
   static bool haveLast = false;
-  static uint32_t lastPktMs = 0;
-  uint32_t nowPlay = millis();
-  if (haveLast && memcmp(lastPkt, p, SAMPLES) == 0 && (nowPlay - lastPktMs) < 70) return;
+  if (haveLast && memcmp(lastPkt, p, SAMPLES) == 0) return;
   memcpy(lastPkt, p, SAMPLES);
   haveLast = true;
-  lastPktMs = nowPlay;
+#endif
 
   int16_t pcm[PCM_N];
   if (!adpcmUnpack(p, pcm)) return;
-  playEnhanceSta(pcm, PCM_N);
 
   int peak = 0;
   int strong = 0;
   for (int i = 0; i < PCM_N; i++) {
     int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
     if (a > peak) peak = a;
-    if (a >= 350) strong++;
+    if (a >= 400) strong++;
   }
-  if (peak < 280 || strong < 4) return;
-
+#if VOICE_SIMPLE
+  if (peak < VOICE_PLAY_PEAK_MIN) return;
+  if (peak < 600) {
+    for (int i = 0; i < PCM_N; i++) {
+      int32_t v = ((int32_t)pcm[i] * 13) / 10;
+      if (v > 32767) v = 32767;
+      if (v < -32768) v = -32768;
+      pcm[i] = (int16_t)v;
+    }
+  }
   rxCount++;
-  bool start = peak >= 520 && strong >= 6;
-  if (start) phraseMs = millis();
-  bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 1300;
-  if (!phrase) return;
+  phraseMs = millis();
   speakerOpen();
   if (!spkOn) return;
   if (!wasTalk) {
-    for (int i = 0; i < 10 && i < PCM_N; i++) {
-      pcm[i] = (int16_t)((int32_t)pcm[i] * i / 10);
-    }
-  } else {
-    for (int i = 0; i < 6 && i < PCM_N; i++) {
-      int32_t blend = ((int32_t)lastOut * (6 - i) + (int32_t)pcm[i] * (i + 1)) / 6;
-      pcm[i] = (int16_t)blend;
+    for (int i = 0; i < 24 && i < PCM_N; i++) {
+      pcm[i] = (int16_t)((int32_t)pcm[i] * i / 24);
     }
   }
   wasTalk = true;
+#else
+  if (peak < VOICE_PLAY_RX_PEAK_MIN) return;
+  if (peak < VOICE_PLAY_BOOST_BELOW) {
+    for (int i = 0; i < PCM_N; i++) {
+      int32_t v = ((int32_t)pcm[i] * VOICE_PLAY_BOOST_NUM) / VOICE_PLAY_BOOST_DEN;
+      if (v > 32767) v = 32767;
+      if (v < -32768) v = -32768;
+      pcm[i] = (int16_t)v;
+    }
+  }
+#if VOICE_PLAY_CLEAR
+  rxCount++;
+  phraseMs = millis();
+#else
+  if (peak < 280 || strong < 5) return;
+  rxCount++;
+  bool start = peak >= 600 && strong >= 8;
+  if (start) phraseMs = millis();
+  bool phrase = phraseMs != 0 && (uint32_t)(millis() - phraseMs) < 900;
+  if (!phrase) return;
+#endif
+  speakerOpen();
+  if (!spkOn) return;
+  if (!wasTalk) {
+    int fadeN = VOICE_PLAY_CLEAR ? 16 : 48;
+    for (int i = 0; i < fadeN && i < PCM_N; i++) {
+      pcm[i] = (int16_t)((int32_t)pcm[i] * i / fadeN);
+    }
+  }
+  wasTalk = true;
+#endif
 
   static int16_t stereo[PCM_N * 2];
   for (int i = 0; i < PCM_N; i++) {
@@ -446,13 +465,9 @@ void playPacket(uint8_t* p) {
   }
   lastOut = playSample(pcm[PCM_N - 1]);
   size_t w = 0;
-  i2s_channel_write(spk, stereo, sizeof(stereo), &w, 120);
+  i2s_channel_write(spk, stereo, sizeof(stereo), &w, 150);
   playCount++;
 }
-
-static VoiceAirRx airRx;
-static uint8_t rxq[8][SAMPLES];
-static int rxqN = 0;
 
 static void feedByte(uint8_t b) {
   if (wantOk) {
@@ -462,12 +477,15 @@ static void feedByte(uint8_t b) {
   }
   bool ready = false;
   if (voiceAirFeed(&airRx, b, &ready) && ready) {
-    if (rxqN < 4) {
+    airPkts++;
+    lastAirRxMs = millis();
+    const int qcap = (int)(sizeof(rxq) / sizeof(rxq[0]));
+    if (rxqN < qcap) {
       memcpy(rxq[rxqN], airRx.body, SAMPLES);
       rxqN++;
     } else {
-      memmove(rxq[0], rxq[1], 3 * SAMPLES);
-      memcpy(rxq[3], airRx.body, SAMPLES);
+      memmove(rxq[0], rxq[1], (size_t)(qcap - 1) * SAMPLES);
+      memcpy(rxq[qcap - 1], airRx.body, SAMPLES);
     }
   }
 }
@@ -479,7 +497,8 @@ static void flushReceiveAudio() {
 }
 
 static void playQueued() {
-  for (int drain = 0; rxqN > 0 && drain < 8; drain++) {
+  const int maxDrain = VOICE_PLAY_CLEAR ? 24 : 2;
+  for (int drain = 0; rxqN > 0 && drain < maxDrain; drain++) {
     uint8_t tmp[SAMPLES];
     memcpy(tmp, rxq[0], SAMPLES);
     if (rxqN > 1) memmove(rxq[0], rxq[1], (size_t)(rxqN - 1) * SAMPLES);
@@ -544,17 +563,16 @@ static bool sendPacket(const uint8_t *audio) {
 void setup() {
   monBegin();
   pttBegin();
-  playGainNum = 11;
   delay(400);
-  monPrint("sta boot\n");
+  monPrint("=== T-Hallow STA firmware ===\n");
+  monPrintf("sta boot (HaLow AT+MODE=STA, spk %d/%d/%d)\n",
+            I2S_BCLK, I2S_LRC, I2S_DIN);
   SerialAH.setRxBufferSize(4096);
   SerialAH.setTxBufferSize(1024);
   SerialAH.begin(115200, SERIAL_8N1, AH_RX, AH_TX);
 
   i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
   chan.auto_clear = true;
-  chan.dma_desc_num = 10;
-  chan.dma_frame_num = 512;
   esp_err_t okChan = i2s_new_channel(&chan, &spk, NULL);
   i2s_std_config_t cfg = {
     .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(8000),
@@ -576,6 +594,11 @@ void setup() {
   if (okStd == ESP_OK) {
     spkOn = false;
     monPrint("speaker quiet\n");
+#if SPEAKER_BEEP_AT_BOOT
+    if (speakerBeepTone(spk, 50000, 20000, 450)) {
+      monPrint("boot beep ok (speaker 7/6/15)\n");
+    }
+#endif
   } else {
     spk = NULL;
     monPrintf("pin setup fail chan=%d std=%d\n", (int)okChan, (int)okStd);
@@ -603,7 +626,6 @@ void setup() {
 }
 
 void loop() {
-  volButtonsPoll();
   netPoll();
   pumpUart();
   halowPollPeerRssi(SerialAH, feedByte, !pttPressed() && !spkOn && rxqN == 0 && !wasTalk);
@@ -627,7 +649,7 @@ void loop() {
       for (int i = 0; i < PCM_N; i++) {
         int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
         if (a > peak) peak = a;
-        if (a >= 400) nStrong++;
+        if (a >= VOICE_AUTO_SAMPLE_MIN) nStrong++;
       }
       static uint32_t voicedMs = 0;
       static int lastPeak = 0;
@@ -635,21 +657,29 @@ void loop() {
       int nLoud = 0;
       for (int i = 0; i < PCM_N; i++) {
         int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
-        if (a >= 500) nLoud++;
+        if (a >= VOICE_AUTO_LOUD_MIN) nLoud++;
       }
-      bool shaped = peak >= 850 && nStrong >= 9;
+      bool shaped = peak >= VOICE_AUTO_SHAPED_PEAK && nStrong >= VOICE_AUTO_STRONG_MIN;
       if (shaped) voicedMs = millis();
       uint32_t nowMs = millis();
-      bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs);
+      bool sendVoice = pttShouldSend(peak, nStrong, shaped, voicedMs, nowMs)
+                       && (shaped || nLoud >= VOICE_AUTO_LOUD_CNT);
+      bool echo;
+#if VOICE_SIMPLE
+      echo = spkOn && peak < 220;
+#else
       bool remotePlay = spkOn || wasTalk;
-      bool echo = (wasTalk && peak < 250 && (nowMs - lastSend) < 150)
-                  || (PTT_HALF_DUPLEX && remotePlay);
-      if (sendVoice && !echo) {
+      echo = (wasTalk && peak < 250 && (nowMs - lastSend) < 150)
+             || (PTT_HALF_DUPLEX && remotePlay);
+#endif
+      uint32_t sinceRx = millis() - lastAirRxMs;
+      bool deferTx = (rxqN > 0 || sinceRx < 140) && peak < 550;
+      if (sendVoice && !echo && !deferTx) {
         uint8_t payload[PAYLOAD];
         adpcmPack(pcm, payload);
         if (sendPacket(payload)) {
           txCount++;
-          if (shaped && peak >= 750 && nLoud >= 5) netNote(payload, PAYLOAD);
+          if (shaped && peak >= VOICE_NET_TX_PEAK && nLoud >= VOICE_NET_LOUD_MIN) netNote(payload, PAYLOAD);
           lastSend = millis();
           if (peak > lastPeak) lastPeak = peak;
           else lastPeak = (lastPeak * 3 + peak) / 4;
@@ -662,11 +692,35 @@ void loop() {
     }
   }
 
+#if SPEAKER_DIAG_PING
+  {
+    static uint32_t lastPing = 0;
+    uint32_t now = millis();
+    if (now > 12000u && rxCount == 0 && playCount == 0 && rxqN == 0 && spk != NULL) {
+      if (lastPing == 0) lastPing = now;
+      if (now - lastPing >= 25000u) {
+        lastPing = now;
+        monPrint("SPEAKER PING — সাড়ে বীপ শুনতে হবে (7/6/15)\n");
+        speakerBeepTone(spk, 50000, 24000, 400);
+      }
+    }
+  }
+#endif
+
   if (millis() - lastPrint > 1000) {
-    monPrintf("tx=%lu rx=%lu play=%lu fail=%lu q=%d spk=%d ptt=%d c0=%lu c1=%lu\n",
-              txCount, rxCount, playCount, failCount, rxqN, spkOn ? 1 : 0,
-              pttPressed() ? 1 : 0,
-              (unsigned long)micC0, (unsigned long)micC1);
+    uint32_t mpk;
+    portENTER_CRITICAL(&mux);
+    mpk = micC0;
+    micC0 = 0;
+    portEXIT_CRITICAL(&mux);
+    monPrintf("tx=%lu rx=%lu play=%lu fail=%lu air=%lu q=%d spk=%d ptt=%d mic_pk=%lu\n",
+              txCount, rxCount, playCount, failCount, airPkts, rxqN, spkOn ? 1 : 0,
+              pttPressed() ? 1 : 0, (unsigned long)mpk);
+    if (airPkts > 0 && playCount == 0) {
+      monPrint("  (air>0 play=0: প্যাকেট এসেছে কিন্তু স্পিকার গেট/ভলিউম)\n");
+    } else if (airPkts == 0 && playCount == 0) {
+      monPrint("  (air=0: AP থেকে হ্যালো প্যাকেট নাই — AP peak/tx দেখুন)\n");
+    }
     lastPrint = millis();
   }
 }

@@ -24,7 +24,7 @@ talk_dash_main_open();
 <div class="info-stack">
   <p class="note">নেটওয়ার্ক বেছে নিন → পাসওয়ার্ড → Connect। শুধু সেই বোর্ডে Wi‑Fi সেট হবে (AP ও STA আলাদা)।</p>
   <p class="note warn">তালিকা <strong>ল্যাপটপের Wi‑Fi নয়</strong> — বোর্ড যেখানে দাঁড়িয়ে সেখানকার নেট স্ক্যান করে সার্ভারে পাঠায়। বোর্ড PC-র নেটে না থাকলে তালিকা খালি থাকে (HaLow কথা আলাদা)।</p>
-  <p class="note warn">অন্য জায়গায় গেলে: PC+বোর্ড একই Wi‑Fi (ফোন হটস্পট), <code>tools/set_local_ip.ps1</code> → নতুন IP + <code>shared/net_config.local.h</code>-এ SSID/পাস → AP/STA re-flash; অথবা আগের মতোই হটস্পট নাম+পাস রেখে <a href="index.php#wifi">সার্ভার</a> প্যানেলে শুধু Upload URL আপডেট।</p>
+  <p class="note warn">অন্য জায়গায় গেলে: PC+বোর্ড একই Wi‑Fi (ফোন হটস্পট)। <code>localhost</code> / <code>T-hallow.test</code> দিয়ে ড্যাশবোর্ড খুললে LAN IP + <code>servers.json</code> নিজে ঠিক হয়; IP বদলালে <code>shared/net_config.local.h</code> আপডেট দেখে AP/STA re-flash করুন।</p>
   <p class="note warn">পুরনো SSID মুছতে: নেট «থাকা» নেই দেখালে Disconnect → ২ মিনিট পর firmware-এর ডিফল্ট SSID চেষ্টা; নাম লিখে সংযোগ = online হলে apply।</p>
   <p class="note">API: <code><?php echo htmlspecialchars($boardApi, ENT_QUOTES, 'UTF-8'); ?></code></p>
 </div>
