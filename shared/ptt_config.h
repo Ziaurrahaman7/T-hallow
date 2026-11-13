@@ -48,9 +48,7 @@ static inline int16_t playSample(int16_t s) {
 }
 
 static inline void pttBegin() {
-#if PTT_REQUIRED
   pinMode(PTT_GPIO, INPUT_PULLUP);
-#endif
 #if VOL_BUTTONS
   pinMode(VOL_UP_GPIO, INPUT_PULLUP);
   pinMode(VOL_DOWN_GPIO, INPUT_PULLUP);
@@ -79,7 +77,8 @@ static inline bool pttPressed() {
 #if PTT_REQUIRED
   return digitalRead(PTT_GPIO) == LOW;
 #else
-  return true;
+  // No PTT: never treat as “button held” (half-duplex still uses spkOn / VAD).
+  return false;
 #endif
 }
 
