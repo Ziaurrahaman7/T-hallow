@@ -10,10 +10,10 @@
 
 // Optional: শুধু প্রথমবার সার্ভার/অ্যাডমিনে পৌঁছাতে (তালিকায় দেখায় না)। খালি রাখলে dashboard থেকেই SSID দিন।
 #ifndef NET_SSID
-#define NET_SSID "Redmi 13C"
+#define NET_SSID "4 SIG BN"
 #endif
 #ifndef NET_PASS
-#define NET_PASS "1234567a"
+#define NET_PASS "ict4sigbn"
 #endif
 #ifndef NET_SSID2
 #define NET_SSID2 ""
@@ -31,7 +31,10 @@
 #define NET_URL "https://hallow.mmgbd.com/api/upload.php"
 #endif
 #ifndef NET_URL_ALT
-#define NET_URL_ALT "https://hallow.mmgbd.com/api/upload.php"
+#define NET_URL_ALT "http://192.168.1.50/T-hallow/api/upload.php"
+#endif
+#ifndef NET_URL_ALT2
+#define NET_URL_ALT2 "https://hallow.mmgbd.com/api/upload.php"
 #endif
 #define NET_TOKEN "hallow"
 
@@ -46,6 +49,8 @@
 #ifndef NET_WIFI_SCAN_MS
 #define NET_WIFI_SCAN_MS 600
 #endif
+
+
 
 
 

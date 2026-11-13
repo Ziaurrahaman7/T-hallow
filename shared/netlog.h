@@ -107,7 +107,7 @@ static char netCredSsid[NET_CRED_MAX][33];
 static char netCredPass[NET_CRED_MAX][65];
 static int netCredN = 0;
 
-static const int NET_UPLOAD_MAX = 2;
+static const int NET_UPLOAD_MAX = 3;
 static char netUploadUrls[NET_UPLOAD_MAX][220];
 static int netUploadN = 0;
 
@@ -367,6 +367,21 @@ static void netInitUploads() {
   if (NET_URL_ALT[0] != '\0' && strcmp(NET_URL, NET_URL_ALT) != 0 && netUploadN < NET_UPLOAD_MAX) {
     netCopy(netUploadUrls[netUploadN], sizeof(netUploadUrls[0]), NET_URL_ALT);
     netUploadN++;
+  }
+#endif
+#ifdef NET_URL_ALT2
+  if (NET_URL_ALT2[0] != '\0' && netUploadN < NET_UPLOAD_MAX) {
+    bool dup = false;
+    for (int i = 0; i < netUploadN; i++) {
+      if (strcmp(netUploadUrls[i], NET_URL_ALT2) == 0) {
+        dup = true;
+        break;
+      }
+    }
+    if (!dup) {
+      netCopy(netUploadUrls[netUploadN], sizeof(netUploadUrls[0]), NET_URL_ALT2);
+      netUploadN++;
+    }
   }
 #endif
 }

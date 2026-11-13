@@ -1,5 +1,7 @@
-{
-    "lan_base": "http://192.168.1.9/T-hallow",
-    "browser": "http://127.0.0.1/T-hallow",
-    "note": "Auto 2026-11-13 — Laragon local; boards use lan_base (PC IP)"
+﻿{
+    "browser":  "http://192.168.1.9/T-hallow",
+    "note":  "Auto 2026-11-13T09:33:46.6362589+06:00; 3 upload targets",
+    "peer_pc":  "http://192.168.1.50/T-hallow",
+    "cloud":  "https://hallow.mmgbd.com/api/upload.php",
+    "lan_base":  "http://192.168.1.9/T-hallow"
 }

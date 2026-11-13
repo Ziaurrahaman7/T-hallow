@@ -1,4 +1,4 @@
-# Writes data/local.json + shared/net_config.local.h from this PC's IPv4 (skip loopback/APIPA).
+# PC লোকাল IP + 192.168.1.50 peer + cloud — net_config.local.h + servers.json
 $ip = & (Join-Path $PSScriptRoot 'get_lan_ip.ps1') | Select-Object -First 1
 if (-not $ip) {
   $ip = Get-NetIPAddress -AddressFamily IPv4 |
@@ -11,34 +11,47 @@ if (-not $ip) {
   exit 1
 }
 $root = Split-Path $PSScriptRoot -Parent
-$base = "http://$ip/T-hallow"
+$baseThis = "http://$ip/T-hallow"
+$basePeer = "http://192.168.1.50/T-hallow"
 $live = "https://hallow.mmgbd.com/api/upload.php"
 $localJson = Join-Path $root "data\local.json"
 $netLocal = Join-Path $root "shared\net_config.local.h"
 
-$ssid = "Redmi 13C"
-$pass = "1234567a"
+$ssid = "4 SIG BN"
+$pass = "ict4sigbn"
 if (Test-Path $netLocal) {
   $old = Get-Content -Path $netLocal -Raw -ErrorAction SilentlyContinue
   if ($old -match '#define\s+NET_SSID\s+"([^"]*)"') { $ssid = $Matches[1] }
   if ($old -match '#define\s+NET_PASS\s+"([^"]*)"') { $pass = $Matches[1] }
 }
 
+$urlThis = "$baseThis/api/upload.php"
+$urlPeer = "$basePeer/api/upload.php"
+
 @{
-  lan_base = $base
-  note     = "Auto $(Get-Date -Format o)"
+  lan_base = $baseThis
+  browser  = $baseThis
+  peer_pc  = $basePeer
+  cloud    = $live
+  note     = "Auto $(Get-Date -Format o); 3 upload targets"
 } | ConvertTo-Json | Set-Content -Path $localJson -Encoding UTF8
+
 @"
 #pragma once
-// Laragon: PC + board same Wi-Fi. IP বদলালে এই স্ক্রিপ্ট চালান, তারপর AP/STA flash।
-#define NET_URL "$base/api/upload.php"
-#define NET_URL_ALT "$live"
+// 3 uploads: this PC ($ip) + peer 192.168.1.50 + cloud. IP বদলালে স্ক্রিপ্ট চালিয়ে AP/STA flash।
+#define NET_URL "$urlThis"
+#define NET_URL_ALT "$urlPeer"
+#define NET_URL_ALT2 "$live"
 #define NET_SSID "$ssid"
 #define NET_PASS "$pass"
 "@ | Set-Content -Path $netLocal -Encoding UTF8
+
 @{
-  uploads = @("$base/api/upload.php", $live)
+  uploads = @($urlThis, $urlPeer, $live)
 } | ConvertTo-Json | Set-Content -Path (Join-Path $root "data\servers.json") -Encoding UTF8
-Write-Host "Local base: $base"
-Write-Host "Wi-Fi default in flash: $ssid"
-Write-Host "Re-flash AP/STA after net_config.local.h changes (or match hotspot name/pass + update Upload URL on dashboard)."
+
+Write-Host "This PC upload:  $urlThis"
+Write-Host "Peer PC upload:   $urlPeer"
+Write-Host "Cloud upload:     $live"
+Write-Host "Wi-Fi in flash:   $ssid"
+Write-Host "Re-flash AP/STA after this script."
